@@ -1,3 +1,11 @@
+<!--
+修改记录:
+  2026-07-05 | kimi-code (md-update) | 更新项目结构树：新增 routes/ types.ts kimi-api-transport.ts content-processor.ts ws-handler.ts session-store.ts session-log-reader.ts
+  2026-07-05 | kimi-code (md-update) | 修正 /api/send 描述：已改为直接调用 WireClient 而非队列
+  2026-07-05 | kimi-code (refactor)   | 架构深化：删除 v1 死代码，引入 TunnelServices DI，拆分 WireClient/HTTP/Session 模块
+  2026-07-05 | FirenzeClaw            | 初始版本
+-->
+
 # Kimi Debug Tunnel
 
 基于 REST API 的 Kimi Code CLI 调试隧道——推送式全自动化 session 编排，无需轮询。
@@ -91,7 +99,7 @@ Tunnel 启动后自动连接 Kimi Server 并选择最近的 session。
 | `/` | GET | Web 调试控制台 |
 | `/api/status` | GET | 隧道状态 |
 | `/api/execute` | POST | 发送 prompt 并等待回复 |
-| `/api/send` | POST | 发送消息到队列（兼容模式） |
+| `/api/send` | POST | 发送 prompt 并等待回复（与 /api/execute 相同机制） |
 | `/ws` | WebSocket | 实时双向通信 |
 
 ### 示例
@@ -112,23 +120,34 @@ curl -X POST http://localhost:3456/api/execute \
 
 ```
 src/
-├── index.ts              # 入口
-├── mcp-server.ts         # MCP stdio 服务器
-├── http-server.ts        # Express + WebSocket
-├── wire-client.ts        # Kimi Server REST API 客户端
-├── message-queue.ts      # 消息队列
-├── session-manager.ts    # Session 扫描与管理
-├── session-orchestrator.ts # 多轮编排引擎
+├── index.ts                 # 入口：创建 TunnelServices，启动 HTTP+MCP
+├── types.ts                 # TunnelServices 依赖注入接口
+├── mcp-server.ts            # MCP stdio 服务器（注册 7 个工具）
+├── http-server.ts           # Express + WebSocket 装配入口
+├── wire-client.ts           # Prompt 执行器（使用 Transport + ContentProcessor）
+├── kimi-api-transport.ts    # 纯 HTTP 传输适配器（GET/POST + auth）
+├── content-processor.ts     # 纯函数：文本提取、思考过滤
+├── message-queue.ts         # WebSocket 客户端管理 + 响应广播
+├── ws-handler.ts            # WebSocket 连接处理器
+├── session-manager.ts       # Session 管理薄委托层
+├── session-store.ts         # 文件系统扫描 + 缓存
+├── session-log-reader.ts    # wire.jsonl 日志解析器
+├── session-orchestrator.ts  # 多轮任务编排引擎
+├── routes/
+│   ├── console.ts           # GET /   Web 调试控制台
+│   ├── execute.ts           # POST /api/execute
+│   ├── send.ts              # POST /api/send
+│   └── status.ts            # GET /api/status
 ├── tools/
-│   ├── execute-prompt.ts
-│   ├── chat-with-session.ts
-│   ├── stream-response.ts
-│   ├── list-sessions.ts
-│   ├── get-session-info.ts
-│   ├── read-session-log.ts
-│   └── get-tunnel-status.ts
+│   ├── execute-prompt.ts    # 发送 prompt 并等待完整回复
+│   ├── chat-with-session.ts # 全自动多轮编排
+│   ├── stream-response.ts   # 实时推送到 WebSocket 客户端
+│   ├── list-sessions.ts     # 列出所有 session
+│   ├── get-session-info.ts  # 查看 session 详情
+│   ├── read-session-log.ts  # 读取对话日志
+│   └── get-tunnel-status.ts # Wire 连接状态、客户端数、运行时间
 └── public/
-    └── console.html       # Web 调试控制台
+    └── console.html          # Web 调试控制台
 ```
 
 ## License
