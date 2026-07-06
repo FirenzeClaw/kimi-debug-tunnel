@@ -34,7 +34,7 @@
 src/
 ├── index.ts                 # 入口：创建 TunnelServices，启动 HTTP+MCP 双服务器
 ├── types.ts                 # TunnelServices 接口（wireClient, messageQueue, startTime, workflowEngine）
-├── mcp-server.ts            # MCP stdio 服务器，注册全部 14 个工具
+├── mcp-server.ts            # MCP stdio 服务器，注册全部 16 个工具
 ├── http-server.ts           # Express + WebSocket 装配入口（薄层）
 ├── wire-client.ts           # Kimi Server REST + WS 推送客户端（状态缓存）
 ├── message-queue.ts         # WebSocket 客户端注册 + pub/sub 广播（简化为 67 行）
@@ -120,15 +120,23 @@ npm run inspector    # MCP Inspector 调试模式
    → { session_id: "session_xxx" }
 
 ② chat_with_session(session_id, task, auto_mode=true)
-   → { submitted: true, hint: "用 poll_session 跟踪" }
+   或 execute_prompt(session_id, task, auto_mode=true)
+   → { submitted: true }
 
-③ poll_session(session_id)          ← 每 10-30s 轮询一次
-   → { state: "active", totalLines: 156, complete: false }
+③ watch_session(session_id)          ← tunnel 后台主动监听，每 3s WS 检查
+   → { watch_id: "watch_xxx" }
 
-④ poll_session(session_id)
-   → { state: "done", complete: true }    ← 工作流完成
+④ ... 统筹 session 可做其他工作 ...
 
-⑤ list_io_records(session_id)       ← 查看对话摘要
+⑤ get_watch_result(watch_id)         ← 拿到最终回复，无需轮询
+   → { ready: true, result: "..." }
+```
+
+### 备选：手动轮询（兼容旧流程）
+
+```
+③ poll_session(session_id)            ← WS 缓存零 I/O 查询
+④ list_io_records(session_id)         ← 查看对话摘要
 ```
 
 ### 工作流引擎（模板驱动多步编排）

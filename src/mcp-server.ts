@@ -20,7 +20,7 @@ import { registerLearnWorkflow } from "./tools/learn-workflow.js";
 import { registerExecuteWorkflow } from "./tools/execute-workflow.js";
 import { registerListTemplates } from "./tools/list-workflow-templates.js";
 import { registerContinueWorkflow } from "./tools/continue-workflow.js";
-import { registerWatchSession, registerGetWatchResult } from "./tools/session-watch.js";
+import { registerWatchSession, registerGetWatchResult, registerContinueWatch } from "./tools/session-watch.js";
 
 const server = new McpServer({
   name: "kimi-debug-tunnel",
@@ -54,6 +54,7 @@ function createServer(): { server: typeof server; services: TunnelServices } {
   registerContinueWorkflow(server, services);
   registerWatchSession(server, services);
   registerGetWatchResult(server, services);
+  registerContinueWatch(server, services);
 
   registerGetTunnelStatus(server, services);
 

@@ -68,3 +68,41 @@ export function registerGetWatchResult(server: McpServer, services: TunnelServic
     }
   );
 }
+
+export function registerContinueWatch(server: McpServer, services: TunnelServices): void {
+  server.tool(
+    "continue_watch",
+    "检查后台监听结果。若任务 session 已完成，自动提交下一步指令并启动新一轮后台监听，形成完整自动化循环。",
+    {
+      watch_id: z.string().describe("当前 watch_id"),
+      next_instruction: z.string().optional().describe("任务完成后发给 session 的下一步指令。提供后自动提交+启动新 watch。"),
+    },
+    async ({ watch_id, next_instruction }) => {
+      const w = getWatcher(services);
+      const result = w.continueWatch(watch_id, next_instruction);
+
+      if (!result) {
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({ ready: false, hint: "任务仍在处理中，稍后调用 continue_watch 再查。" }, null, 2),
+          }],
+        };
+      }
+
+      const resp: Record<string, unknown> = {
+        ready: true,
+        result: result.result,
+      };
+      if (result.next_watch_id) resp.next_watch_id = result.next_watch_id;
+      if (result.error) resp.error = result.error;
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify(resp, null, 2),
+        }],
+      };
+    }
+  );
+}
