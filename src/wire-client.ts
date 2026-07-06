@@ -148,21 +148,8 @@ export class WireClient {
       `[wire-client] Created session ${resp.id} (cwd: ${options.cwd}, permission: ${options.permissionMode || "default"})\n`
     );
 
-    // Enable auto mode by sending /auto as the first prompt, using WebSocket wait
-    if (options.permissionMode === "auto") {
-      this.sessionId = resp.id;
-      this.wsSubscribe(resp.id);
-      try {
-        await this.sendPrompt("/auto", {
-          timeoutMs: 30000,
-          autoApprove: false,
-          includeThinking: false,
-        });
-        process.stderr.write(`[wire-client] Auto mode enabled on ${resp.id}\n`);
-      } catch {
-        process.stderr.write(`[wire-client] /auto on ${resp.id} failed (may already be auto)\n`);
-      }
-    }
+    // Auto mode is applied per-prompt via the REST API's permission_mode field.
+    // We no longer inject /auto as a text prompt — that triggered unwanted LLM processing.
 
     return { sessionId: resp.id, title: resp.title };
   }
@@ -462,9 +449,16 @@ export class WireClient {
     // Subscribe to this session if not already
     this.wsSubscribe(this.sessionId);
 
+    const body: Record<string, unknown> = {
+      content: [{ type: "text", text: prompt }],
+    };
+    if (autoApprove) {
+      body.permission_mode = "auto";
+    }
+
     const resp = await this.apiPost<{ prompt_id: string }>(
       `/api/v1/sessions/${this.sessionId}/prompts`,
-      { content: [{ type: "text", text: prompt }] }
+      body
     );
     return { promptId: resp.prompt_id };
   }
@@ -518,6 +512,7 @@ export class WireClient {
       content: KimiContentBlock[];
     }>(`/api/v1/sessions/${this.sessionId}/prompts`, {
       content: [{ type: "text", text: prompt }],
+      ...(autoApprove && { permission_mode: "auto" }),
     });
 
     const promptId = submitResp.prompt_id;
