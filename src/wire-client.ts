@@ -209,6 +209,10 @@ export class WireClient {
     return this.connected;
   }
 
+  isWsConnected(): boolean {
+    return !!(this.ws && this.ws.readyState === WebSocket.OPEN);
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════════
   // WebSocket push layer
   // ═══════════════════════════════════════════════════════════════════════════════
@@ -362,10 +366,52 @@ export class WireClient {
 
   /**
    * Enable watch output: write completion status to a file after each prompt.completed.
-   * The coordinating session reads this file to know when the task is done.
+   * Falls back to REST polling every 3s if WS events are not received.
    */
   setWatchOutput(path: string): void {
     this.watchOutputPath = path;
+    // Start a REST polling fallback in case WS events are missed
+    this.startWatchPolling();
+  }
+
+  private watchPollTimer: ReturnType<typeof setInterval> | null = null;
+
+  private startWatchPolling(): void {
+    if (this.watchPollTimer) return;
+    this.watchPollTimer = setInterval(async () => {
+      if (!this.watchOutputPath || !this.sessionId) return;
+      try {
+        const status = (await this.getSessionStatus()) || "unknown";
+        if (status === "idle" || status === "aborted") {
+          // Fetch messages to get the result
+          const msgs = await this.apiGet<{ items: Array<{ content: Array<{ type: string; text?: string }> }> }>(
+            `/api/v1/sessions/${this.sessionId}/messages?page_size=3&role=assistant`
+          );
+          const items = msgs?.items || [];
+          let text = "";
+          for (let i = items.length - 1; i >= 0; i--) {
+            for (const block of items[i].content || []) {
+              if (block.type === "text" && block.text) { text = block.text; break; }
+            }
+            if (text) break;
+          }
+          if (text) {
+            try {
+              const { writeFileSync, mkdirSync } = require("node:fs") as typeof import("node:fs");
+              const { dirname } = require("node:path") as typeof import("node:path");
+              mkdirSync(dirname(this.watchOutputPath!), { recursive: true });
+              writeFileSync(this.watchOutputPath!, JSON.stringify({
+                sessionId: this.sessionId,
+                status: "completed",
+                result: text,
+                completedAt: new Date().toISOString(),
+                source: "poll_fallback",
+              }, null, 2), "utf-8");
+            } catch {}
+          }
+        }
+      } catch {}
+    }, 3000);
   }
 
   /**
@@ -650,6 +696,10 @@ export class WireClient {
     this.connected = false;
     if (this.wsReconnectTimer) {
       clearTimeout(this.wsReconnectTimer);
+    }
+    if (this.watchPollTimer) {
+      clearInterval(this.watchPollTimer);
+      this.watchPollTimer = null;
     }
     if (this.ws) {
       this.ws.close();

@@ -23,6 +23,7 @@ export function registerGetTunnelStatus(server: McpServer, services: TunnelServi
                 ...status,
                 uptimeSeconds: uptime,
                 uptimeDisplay: `${Math.floor(uptime / 60)}m ${uptime % 60}s`,
+                wsConnected: wireClient.isWsConnected(),
               },
               null,
               2
