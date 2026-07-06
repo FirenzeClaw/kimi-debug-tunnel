@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { getSessionInfo } from "../session-manager.js";
+import { getSessionInfo } from "../session-store.js";
 
 export function registerGetSessionInfo(server: McpServer): void {
   server.tool(

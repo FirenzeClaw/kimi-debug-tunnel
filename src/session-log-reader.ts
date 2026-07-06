@@ -313,29 +313,35 @@ export async function pollSessionStatus(sessionId: string): Promise<SessionStatu
 
   try {
     const raw = await readFile(wirePath, "utf-8");
-    const lines = raw.split("\n").filter((l) => l.trim());
-    const tailSize = Math.min(lines.length, 15);
-    const recentLines = lines.slice(-tailSize);
+    const allLines = raw.split("\n").filter((l) => l.trim());
+    const tailSize = Math.min(allLines.length, 20);
+    const recentLines = allLines.slice(-tailSize);
 
     let isAwaiting = false;
-    let hasEndTurn = false;
-    let hasToolCall = false;
     let hasError = false;
     let inSwarm = false;
     let lastTurn = 0;
     let toolCallsInTurn = 0;
+    // Track the line index of the most recent critical events
+    let lastEndTurnIdx = -1;
+    let lastTurnPromptIdx = -1;
+    let lastToolCallIdx = -1;
 
-    for (const line of recentLines) {
+    for (let i = 0; i < recentLines.length; i++) {
       try {
-        const entry = JSON.parse(line);
+        const entry = JSON.parse(recentLines[i]);
         const type = entry.type || "";
+        // Map recent index back to actual line number
+        const actualIdx = allLines.length - tailSize + i;
 
-        if (type === "turn.prompt") lastTurn++;
+        if (type === "turn.prompt") { lastTurn++; lastTurnPromptIdx = actualIdx; }
         if (type.includes("awaiting_approval")) isAwaiting = true;
         if (type === "context.append_loop_event") {
           const eventType = entry.event?.type || "";
-          if (eventType === "step.end" && entry.event?.finishReason === "end_turn") hasEndTurn = true;
-          if (eventType === "tool.call") { hasToolCall = true; toolCallsInTurn++; }
+          if (eventType === "step.end" && entry.event?.finishReason === "end_turn") {
+            lastEndTurnIdx = actualIdx;
+          }
+          if (eventType === "tool.call") { lastToolCallIdx = actualIdx; toolCallsInTurn++; }
         }
         if (type.includes("error")) hasError = true;
         if (JSON.stringify(entry).includes("swarm")) inSwarm = true;
@@ -345,14 +351,19 @@ export async function pollSessionStatus(sessionId: string): Promise<SessionStatu
     let state: SessionStatus["state"];
     const alerts: string[] = [];
 
-    if (isAwaiting && !hasToolCall) {
+    // Priority order: awaiting_approval > done > swarm > active > error > idle
+    if (isAwaiting) {
       state = "awaiting_approval";
       alerts.push("Session 等待工具审批 — auto_mode 可能未生效");
-    } else if (hasEndTurn && !hasToolCall) {
+    } else if (lastEndTurnIdx > lastTurnPromptIdx && lastEndTurnIdx >= 0) {
+      // end_turn happened after the last turn.prompt → turn is truly done
+      state = "done";
+    } else if (lastEndTurnIdx >= 0 && lastTurnPromptIdx < 0) {
+      // first turn, end_turn detected but no follow-up turn.prompt → done
       state = "done";
     } else if (inSwarm) {
       state = "swarm";
-    } else if (hasToolCall) {
+    } else if (lastToolCallIdx >= 0 && lastToolCallIdx > lastEndTurnIdx && lastToolCallIdx > lastTurnPromptIdx) {
       state = "active";
     } else if (hasError) {
       state = "error";
@@ -364,7 +375,7 @@ export async function pollSessionStatus(sessionId: string): Promise<SessionStatu
     return {
       sessionId,
       state,
-      totalLines: lines.length,
+      totalLines: allLines.length,
       lastTurn,
       toolCallsInTurn,
       complete: state === "done",

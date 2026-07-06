@@ -1,67 +1,73 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { pollSessionStatus } from "../session-manager.js";
-import { flowOrchestrator } from "../flow-orchestrator.js";
+import type { TunnelServices } from "../types.js";
+import { pollSessionStatus } from "../session-log-reader.js";
 
-export function registerPollSession(server: McpServer): void {
+export function registerPollSession(server: McpServer, services?: TunnelServices): void {
+  const { wireClient, workflowEngine } = services || {};
+
   server.tool(
     "poll_session",
-    "轮询 session 运行状态。返回结构化状态报告：active/swarm/awaiting_approval/done/error/idle，以及行数、tool call 计数、告警列表。用于监控工作流是否正常运行或已卡住。",
+    "轮询 session 运行状态。返回结构化状态报告，优先使用 WebSocket 推送缓存（零 I/O）。",
     {
-      session_id: z
-        .string()
-        .describe("目标 session ID。可从 list_sessions 或 create_session 获取。"),
+      session_id: z.string().describe("目标 session ID"),
     },
     async ({ session_id }) => {
-      const status = await pollSessionStatus(session_id);
+      // Fast path: WebSocket-pushed cache (zero file I/O)
+      if (wireClient) {
+        const cached = wireClient.getCachedStatus(session_id);
+        if (cached && cached !== "unknown") {
+          const stateLabels: Record<string, string> = {
+            active: "🟢 运行中", swarm: "🟢 并行调度中",
+            awaiting_approval: "🟡 等待审批", done: "✅ 已完成",
+            error: "🔴 错误", idle: "⏳ 空闲",
+          };
+          // Check engine for active flow
+          const flow = workflowEngine?.getFlow(session_id);
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                sessionId: session_id,
+                state: cached,
+                stateLabel: stateLabels[cached] || cached,
+                complete: cached === "done",
+                totalLines: 0,  // WS cache doesn't track line count
+                source: "ws_cache",
+                ...(flow && { flow }),
+              }, null, 2),
+            }],
+          };
+        }
+      }
 
+      // Fallback: parse wire.jsonl
+      const status = await pollSessionStatus(session_id);
       if (!status) {
         return {
-          content: [
-            {
-              type: "text",
-              text: `Session "${session_id}" 未找到或日志不可读。`,
-            },
-          ],
+          content: [{ type: "text", text: `Session "${session_id}" 未找到或日志不可读。` }],
           isError: true,
         };
       }
 
-      // Human-readable state labels
       const stateLabels: Record<string, string> = {
-        active: "🟢 运行中",
-        swarm: "🟢 并行调度中",
-        awaiting_approval: "🟡 等待审批",
-        done: "✅ 已完成",
-        error: "🔴 错误",
-        idle: "⏳ 空闲",
+        active: "🟢 运行中", swarm: "🟢 并行调度中",
+        awaiting_approval: "🟡 等待审批", done: "✅ 已完成",
+        error: "🔴 错误", idle: "⏳ 空闲",
       };
 
-      // Check flow orchestrator for active flow on this session
-      const flow = flowOrchestrator.getFlow(session_id);
+      const flow = workflowEngine?.getFlow(session_id);
 
       return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(
-              {
-                ...status,
-                stateLabel: stateLabels[status.state] || status.state,
-                ...(flow && {
-                  flow: {
-                    status: flow.status,
-                    currentStep: flow.currentStep + 1,
-                    totalSteps: flow.steps.length,
-                    error: flow.error,
-                  },
-                }),
-              },
-              null,
-              2
-            ),
-          },
-        ],
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            ...status,
+            stateLabel: stateLabels[status.state] || status.state,
+            source: "file_parse",
+            ...(flow && { flow }),
+          }, null, 2),
+        }],
       };
     }
   );

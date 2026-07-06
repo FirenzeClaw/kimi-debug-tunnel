@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { readSessionLog } from "../session-manager.js";
+import { readSessionLog } from "../session-log-reader.js";
 
 export function registerReadSessionLog(server: McpServer): void {
   server.tool(

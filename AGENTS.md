@@ -1,5 +1,6 @@
 <!--
 修改记录:
+  2026-07-06 | kimi-code (architecture) | 架构深化 5/8 项：删除 session-manager 透传桶、message-queue 队列→pub/sub、WireClientFactory DI、消除 flowOrchestrator 单例、run_flow 统一到 WorkflowEngine、WS 推送状态缓存
   2026-07-06 | kimi-code (bugfix) | selftest 修复：WireClient.connect 缺失、activeExecutions 泄漏、model/thinking 参数被忽略、escapeYaml 转义不完整
   2026-07-06 | kimi-code (feature) | 新增自适应工作流引擎：learn_workflow/execute_workflow/list_templates/continue_workflow 4个工具 + 模板存储 + Web 监管页面
   2026-07-06 | kimi-code (bugfix) | 修复 run_flow /auto 注入：不设 session 级 permission_mode，改用 REST API autoApprove；submitPrompt 新增 autoApprove 重试机制
@@ -35,10 +36,9 @@ src/
 ├── types.ts                 # TunnelServices 接口（wireClient, messageQueue, startTime, workflowEngine）
 ├── mcp-server.ts            # MCP stdio 服务器，注册全部 14 个工具
 ├── http-server.ts           # Express + WebSocket 装配入口（薄层）
-├── wire-client.ts           # Kimi Server REST API 客户端
-├── message-queue.ts         # WebSocket 客户端管理 + 响应广播
-├── session-manager.ts       # Session 管理（枚举、日志解析、IO提取、状态轮询）
-├── session-orchestrator.ts  # 多轮任务编排引擎
+├── wire-client.ts           # Kimi Server REST + WS 推送客户端（状态缓存）
+├── message-queue.ts         # WebSocket 客户端注册 + pub/sub 广播（简化为 67 行）
+├── session-orchestrator.ts  # 多轮任务编排引擎（不再被 chat_with_session 使用）
 ├── workflow-template.ts     # 工作流模板类型定义 + YAML解析 + 校验
 ├── workflow-store.ts        # 模板持久化（CRUD：list/load/save/delete）
 ├── workflow-engine.ts       # 自适应工作流引擎：创建session→逐步驱动→阻塞处理→恢复

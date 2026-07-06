@@ -31,8 +31,9 @@ const server = new McpServer({
 function createServer(): { server: typeof server; services: TunnelServices } {
   const wireClient = new WireClient();
   const messageQueue = new MessageQueue();
-  const workflowEngine = new WorkflowEngine({ wireClient, messageQueue, startTime: Date.now() });
-  const services: TunnelServices = { wireClient, messageQueue, startTime: Date.now(), workflowEngine };
+  const wireClientFactory = { create: () => new WireClient() };
+  const workflowEngine = new WorkflowEngine({ wireClient, messageQueue, startTime: Date.now(), wireClientFactory });
+  const services: TunnelServices = { wireClient, messageQueue, startTime: Date.now(), workflowEngine, wireClientFactory };
 
   registerCreateSession(server, services);
   registerExecutePrompt(server, services);
@@ -44,7 +45,7 @@ function createServer(): { server: typeof server; services: TunnelServices } {
   registerGetSessionInfo(server);
   registerReadSessionLog(server);
   registerListIORecords(server);
-  registerPollSession(server);
+  registerPollSession(server, services);
 
   registerLearnWorkflow(server);
   registerListTemplates(server);

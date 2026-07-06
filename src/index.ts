@@ -5,7 +5,7 @@ import { WorkflowEngine } from "./workflow-engine.js";
 import type { TunnelServices } from "./types.js";
 import { startMcpServer } from "./mcp-server.js";
 import { startHttpServer } from "./http-server.js";
-import { listSessions } from "./session-manager.js";
+import { listSessions } from "./session-store.js";
 
 const PORT = parseInt(process.env.TUNNEL_PORT || "3456", 10);
 
@@ -14,8 +14,9 @@ async function main(): Promise<void> {
 
   const wireClient = new WireClient();
   const messageQueue = new MessageQueue();
-  const workflowEngine = new WorkflowEngine({ wireClient, messageQueue, startTime: Date.now() });
-  const services: TunnelServices = { wireClient, messageQueue, startTime: Date.now(), workflowEngine };
+  const wireClientFactory = { create: () => new WireClient() };
+  const workflowEngine = new WorkflowEngine({ wireClient, messageQueue, startTime: Date.now(), wireClientFactory });
+  const services: TunnelServices = { wireClient, messageQueue, startTime: Date.now(), workflowEngine, wireClientFactory };
 
   // Start HTTP + WebSocket server for external clients
   startHttpServer(PORT, services);

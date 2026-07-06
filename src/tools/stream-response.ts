@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { randomUUID } from "node:crypto";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { TunnelServices } from "../types.js";
 
@@ -12,7 +13,8 @@ export function registerStreamResponse(server: McpServer, services: TunnelServic
       in_reply_to: z.string().optional().describe("关联的原始消息 ID"),
     },
     async ({ content, in_reply_to }) => {
-      const msg = messageQueue.enqueueResponse(content, in_reply_to);
+      const msgId = randomUUID();
+      messageQueue.broadcastJson({ id: msgId, content, inReplyTo: in_reply_to, timestamp: new Date().toISOString() });
       return {
         content: [
           {
@@ -20,7 +22,7 @@ export function registerStreamResponse(server: McpServer, services: TunnelServic
             text: JSON.stringify(
               {
                 success: true,
-                messageId: msg.id,
+                messageId: msgId,
                 clientCount: messageQueue.getClientCount(),
                 message: "Response streamed to all connected clients",
               },

@@ -99,7 +99,7 @@ export function startHttpServer(port: number, services: TunnelServices): void {
       return;
     }
 
-    const msg = messageQueue.enqueueIncoming(content, undefined, sessionId);
+    const msg = { id: randomUUID(), content, timestamp: new Date().toISOString(), sessionId };
     res.json({ success: true, messageId: msg.id });
   });
 
@@ -168,11 +168,11 @@ export function startHttpServer(port: number, services: TunnelServices): void {
                 );
               });
           } else {
-            messageQueue.enqueueIncoming(data.content, clientId, data.sessionId);
+            // wireClient not connected — ignore incoming commands
           }
         }
       } catch {
-        messageQueue.enqueueIncoming(raw.toString(), clientId);
+        // Unparseable message — ignore
       }
     });
 

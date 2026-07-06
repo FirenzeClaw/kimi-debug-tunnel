@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { TunnelServices, WorkflowProgress } from "./types.js";
+import type { TunnelServices, WorkflowProgress, WireClientFactory } from "./types.js";
 import { WireClient } from "./wire-client.js";
 import type { MessageQueue } from "./message-queue.js";
 import type {
@@ -104,6 +104,7 @@ function detectBlockage(
 
 export class WorkflowEngine {
   private messageQueue: MessageQueue;
+  private wireClientFactory: WireClientFactory;
   private activeExecutions = new Map<string, {
     executionId: string;
     template: WorkflowTemplate;
@@ -118,6 +119,7 @@ export class WorkflowEngine {
 
   constructor(services: TunnelServices) {
     this.messageQueue = services.messageQueue;
+    this.wireClientFactory = services.wireClientFactory;
   }
 
   /**
@@ -141,7 +143,7 @@ export class WorkflowEngine {
     let status: ExecutionStatus = "running";
 
     // Dedicated WireClient for this workflow execution
-    const wireClient = new WireClient();
+    const wireClient = this.wireClientFactory.create();
     try {
       await wireClient.connect();
     } catch (err) {
@@ -265,19 +267,17 @@ export class WorkflowEngine {
     }
     await wireClient.close();
 
-    this.messageQueue.enqueueResponse(
-      JSON.stringify({
-        type: "workflow_complete",
-        executionId,
-        template: template.name,
-        sessionId,
-        status,
-        steps: stepResults.length,
-        summary,
-        totalDuration,
-        timestamp: new Date().toISOString(),
-      })
-    );
+    this.messageQueue.broadcastJson({
+      type: "workflow_complete",
+      executionId,
+      template: template.name,
+      sessionId,
+      status,
+      steps: stepResults.length,
+      summary,
+      totalDuration,
+      timestamp: new Date().toISOString(),
+    });
 
     return {
       executionId,
@@ -530,12 +530,10 @@ export class WorkflowEngine {
       onProgress(progress);
     }
     // Also broadcast via WebSocket
-    this.messageQueue.enqueueResponse(
-      JSON.stringify({
-        type: "workflow_progress",
-        ...progress,
-      })
-    );
+    this.messageQueue.broadcastJson({
+      type: "workflow_progress",
+      ...progress,
+    });
   }
 
   private buildNextStepOptions(status: ExecutionStatus): string[] {
@@ -663,6 +661,28 @@ export class WorkflowEngine {
     };
   }
 
+  /**
+   * Find an active execution by session ID.
+   */
+  getFlow(sessionId: string): {
+    executionId: string;
+    status: ExecutionStatus;
+    currentStep: number;
+    totalSteps: number;
+  } | null {
+    for (const [id, state] of this.activeExecutions) {
+      if (state.sessionId === sessionId) {
+        return {
+          executionId: id,
+          status: state.status,
+          currentStep: state.currentStepIndex,
+          totalSteps: state.template.steps.length,
+        };
+      }
+    }
+    return null;
+  }
+
   // ── Private: Resume Execution ────────────────────────────────────────────────
 
   private async resumeExecution(
@@ -719,19 +739,17 @@ export class WorkflowEngine {
     const totalDuration = Date.now() - startTime;
     const summary = this.buildSummary(template.name, stepResults, status, totalDuration);
 
-    this.messageQueue.enqueueResponse(
-      JSON.stringify({
-        type: "workflow_complete",
-        executionId,
-        template: template.name,
-        sessionId,
-        status,
-        steps: stepResults.length,
-        summary,
-        totalDuration,
-        timestamp: new Date().toISOString(),
-      })
-    );
+    this.messageQueue.broadcastJson({
+      type: "workflow_complete",
+      executionId,
+      template: template.name,
+      sessionId,
+      status,
+      steps: stepResults.length,
+      summary,
+      totalDuration,
+      timestamp: new Date().toISOString(),
+    });
 
     return {
       executionId,

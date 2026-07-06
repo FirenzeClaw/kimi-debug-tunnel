@@ -1,12 +1,15 @@
 /**
- * Kimi Server REST API client.
+ * Kimi Server REST API client with WebSocket push notifications.
  *
- * Uses the local Kimi Code server REST API to send prompts and read responses.
- * Thinking content is filtered out by default; set `includeThinking: true` to include it.
+ * Uses the local Kimi Code server REST API for commands (submit prompt, create session)
+ * and WebSocket event streaming for real-time status changes — eliminating polling.
  *
  * Prerequisites: kimi web --no-open --port <port>
  * Token: printed at startup or available from the web UI URL hash.
  */
+
+import { randomUUID } from "node:crypto";
+import { WebSocket } from "ws";
 
 interface KimiContentBlock {
   type: "text" | "thinking" | "tool_use" | "tool_result";
@@ -49,11 +52,46 @@ export interface CreateSessionOptions {
   thinking?: string;
 }
 
+// ── WebSocket event types ────────────────────────────────────────────────────────
+
+interface WsFrame {
+  type: string;
+  id?: string;
+  payload?: Record<string, unknown>;
+}
+
+interface SessionEvent {
+  type: string;
+  seq: number;
+  epoch: string;
+  session_id: string;
+  timestamp: string;
+  payload: {
+    type: string;
+    status?: string;
+    previous_status?: string;
+    current_prompt_id?: string;
+    reason?: string;
+    turnId?: number;
+  };
+}
+
 export class WireClient {
   private baseUrl: string;
   private token: string;
   private sessionId: string;
   private connected = false;
+
+  // WebSocket push layer
+  private ws: WebSocket | null = null;
+  private wsUrl: string;
+  private wsClientId: string;
+  private wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private wsSubscribedSessions = new Set<string>();
+  // Event-driven wait: resolve when status changes to idle
+  private statusResolvers = new Map<string, Array<{ resolve: (v: string) => void; reject: (e: Error) => void }>>();
+  // WS-pushed session state cache — zero-I/O alternative to wire.jsonl parsing
+  private sessionStateCache = new Map<string, { status: string; lastTurnId?: number; lastText?: string; updatedAt: number }>();
 
   constructor(sessionId?: string) {
     this.baseUrl =
@@ -61,10 +99,17 @@ export class WireClient {
     this.token =
       process.env.KIMI_SERVER_TOKEN || "";
     this.sessionId = sessionId || "";
+    this.wsUrl = this.baseUrl.replace(/^http/, "ws") + "/api/v1/ws";
+    this.wsClientId = "tunnel-" + randomUUID().slice(0, 8);
   }
 
   setSessionId(sessionId: string): void {
+    const oldId = this.sessionId;
     this.sessionId = sessionId;
+    // Subscribe to new session via WebSocket if already connected
+    if (this.ws && this.ws.readyState === WebSocket.OPEN && sessionId && sessionId !== oldId) {
+      this.wsSubscribe(sessionId);
+    }
   }
 
   getSessionId(): string {
@@ -75,9 +120,10 @@ export class WireClient {
     this.token = token;
   }
 
-  /**
-   * Create a new session via the Kimi Server REST API.
-   */
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // Session creation
+  // ═══════════════════════════════════════════════════════════════════════════════
+
   async createSession(options: CreateSessionOptions): Promise<{ sessionId: string; title: string }> {
     const body: Record<string, unknown> = {
       metadata: { cwd: options.cwd },
@@ -102,10 +148,10 @@ export class WireClient {
       `[wire-client] Created session ${resp.id} (cwd: ${options.cwd}, permission: ${options.permissionMode || "default"})\n`
     );
 
-    // Enable auto mode by sending /auto as the first prompt.
-    // The API's permission_mode field is not persisted, so we use the CLI command instead.
+    // Enable auto mode by sending /auto as the first prompt, using WebSocket wait
     if (options.permissionMode === "auto") {
       this.sessionId = resp.id;
+      this.wsSubscribe(resp.id);
       try {
         await this.sendPrompt("/auto", {
           timeoutMs: 30000,
@@ -120,6 +166,10 @@ export class WireClient {
 
     return { sessionId: resp.id, title: resp.title };
   }
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // Connection (REST health check + WebSocket handshake)
+  // ═══════════════════════════════════════════════════════════════════════════════
 
   async connect(): Promise<void> {
     if (this.connected) return;
@@ -137,6 +187,12 @@ export class WireClient {
         process.stderr.write(
           `[wire-client] Connected to Kimi server v${metaResp.server_version} (session: ${this.sessionId || "none"})\n`
         );
+
+        // Connect WebSocket for push notifications
+        this.wsConnect().catch((err) => {
+          process.stderr.write(`[wire-client] WebSocket unavailable, falling back to polling: ${err.message}\n`);
+        });
+
         return;
       } catch (err) {
         const isLastAttempt = attempt === maxRetries;
@@ -162,13 +218,214 @@ export class WireClient {
     return this.connected;
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // WebSocket push layer
+  // ═══════════════════════════════════════════════════════════════════════════════
+
+  private async wsConnect(): Promise<void> {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) return;
+
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(this.wsUrl);
+      this.ws = ws;
+
+      const timeout = setTimeout(() => {
+        ws.close();
+        reject(new Error("WebSocket handshake timeout"));
+      }, 10000);
+
+      ws.onopen = () => {
+        // Send client_hello
+        ws.send(JSON.stringify({
+          type: "client_hello",
+          id: randomUUID(),
+          payload: {
+            client_id: this.wsClientId,
+          },
+        }));
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const frame: WsFrame = JSON.parse(event.data.toString());
+
+          if (frame.type === "server_hello") {
+            clearTimeout(timeout);
+            process.stderr.write(`[wire-client] WebSocket connected (${this.wsClientId})\n`);
+
+            // Subscribe to current session if set
+            if (this.sessionId) {
+              this.wsSubscribe(this.sessionId);
+            }
+
+            resolve();
+            return;
+          }
+
+          if (frame.type === "session_event") {
+            this.handleSessionEvent(frame as unknown as SessionEvent);
+            return;
+          }
+
+          if (frame.type === "ping") {
+            ws.send(JSON.stringify({ type: "pong", id: frame.id }));
+            return;
+          }
+        } catch {
+          // Ignore unparseable frames
+        }
+      };
+
+      ws.onerror = () => {
+        clearTimeout(timeout);
+        reject(new Error("WebSocket connection error"));
+      };
+
+      ws.onclose = () => {
+        this.ws = null;
+        // Auto-reconnect after 3s
+        if (this.connected) {
+          this.wsReconnectTimer = setTimeout(() => {
+            process.stderr.write("[wire-client] WebSocket reconnecting...\n");
+            this.wsConnect().catch(() => {});
+          }, 3000);
+        }
+      };
+    });
+  }
+
+  private wsSubscribe(sessionId: string): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    if (this.wsSubscribedSessions.has(sessionId)) return;
+
+    this.ws.send(JSON.stringify({
+      type: "subscribe",
+      id: randomUUID(),
+      payload: {
+        session_ids: [sessionId],
+      },
+    }));
+    this.wsSubscribedSessions.add(sessionId);
+    process.stderr.write(`[wire-client] Subscribed to session ${sessionId} via WebSocket\n`);
+  }
+
+  private handleSessionEvent(event: SessionEvent): void {
+    const sessionId = event.session_id;
+    const payload = event.payload;
+    if (!payload || !payload.type) return;
+
+    // Update cache
+    const cached = this.sessionStateCache.get(sessionId) || { status: "unknown", updatedAt: 0 };
+    if (payload.type === "event.session.status_changed" && payload.status) {
+      cached.status = payload.status as string;
+      cached.updatedAt = Date.now();
+    }
+    if (payload.type === "turn.started") {
+      cached.lastTurnId = payload.turnId;
+      cached.updatedAt = Date.now();
+    }
+    this.sessionStateCache.set(sessionId, cached);
+
+    // Auto-approve awaiting approvals
+    if (payload.type === "event.session.status_changed") {
+      const status = payload.status;
+
+      // Notify any waiting sendPrompt calls
+      const resolvers = this.statusResolvers.get(sessionId);
+      if (resolvers && resolvers.length > 0) {
+        if (status === "idle" || status === "aborted") {
+          for (const r of resolvers) r.resolve(status);
+          this.statusResolvers.delete(sessionId);
+        } else if (status === "awaiting_approval") {
+          // Don't resolve — caller might want to approve and continue waiting
+          // Push the status update so the caller can react
+          const resolver = resolvers[0];
+          if (resolver) resolver.resolve("awaiting_approval");
+        }
+      }
+    }
+
+    // Log key events
+    if (payload.type === "turn.started") {
+      process.stderr.write(`[wire-client] Turn started for ${sessionId}\n`);
+    }
+    if (payload.type === "turn.ended") {
+      process.stderr.write(`[wire-client] Turn ended for ${sessionId}: ${payload.reason || "unknown"}\n`);
+    }
+  }
+
   /**
-   * Submit a prompt without waiting for completion. Returns prompt_id immediately.
-   * Use read_session_log or list_io_records to track progress.
-   *
-   * When autoApprove is true, automatically approves pending approvals before submitting,
-   * and retries if session was awaiting_approval.
+   * Wait for a session status change via WebSocket.
+   * Falls back to polling if WebSocket is not connected.
    */
+  private waitForStatus(
+    sessionId: string,
+    targetStatus: string,
+    timeoutMs: number,
+    autoApprove: boolean
+  ): Promise<string> {
+    // If WebSocket is connected, use event-driven wait
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          // Timeout — resolve anyway (caller will fetch messages)
+          resolve("timeout");
+        }, timeoutMs);
+
+        const resolvers = this.statusResolvers.get(sessionId) || [];
+        resolvers.push({
+          resolve: (status: string) => {
+            clearTimeout(timer);
+            if (status === "awaiting_approval" && autoApprove) {
+              // Approve and continue waiting
+              this.approveAll(sessionId).then(() => {
+                // Re-register to wait for idle
+                const more = this.statusResolvers.get(sessionId) || [];
+                more.push({
+                  resolve: (s: string) => { clearTimeout(timer); resolve(s); },
+                  reject: (e: Error) => { clearTimeout(timer); reject(e); },
+                });
+                this.statusResolvers.set(sessionId, more);
+              }).catch(() => resolve(status));
+            } else {
+              resolve(status);
+            }
+          },
+          reject: (err: Error) => {
+            clearTimeout(timer);
+            reject(err);
+          },
+        });
+        this.statusResolvers.set(sessionId, resolvers);
+      });
+    }
+
+    // Fallback: polling
+    const startTime = Date.now();
+    return new Promise((resolve) => {
+      const poll = async () => {
+        if (Date.now() - startTime > timeoutMs) {
+          resolve("timeout");
+          return;
+        }
+        const status = await this.getSessionStatus();
+        if (status === targetStatus || status === "unknown" || status === "aborted") {
+          resolve(status);
+          return;
+        }
+        if (status === "awaiting_approval" && autoApprove) {
+          await this.approveAll(sessionId);
+        }
+        setTimeout(poll, 1000);
+      };
+      poll();
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // Prompt submission
+  // ═══════════════════════════════════════════════════════════════════════════════
+
   async submitPrompt(
     prompt: string,
     options: { autoApprove?: boolean } = {}
@@ -182,32 +439,28 @@ export class WireClient {
       throw new Error("No session ID set.");
     }
 
-    // Guard: refuse to inject a prompt while tool_calls are in-flight.
-    // If autoApprove is on and session is awaiting_approval, approve all and retry.
-    const maxRetries = 3;
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      const status = await this.getSessionStatus();
-
-      if (status === "awaiting_approval" && autoApprove) {
-        await this.approveAll(this.sessionId);
-        await sleep(500);
-        continue;
-      }
-
-      if (status === "running") {
-        if (autoApprove && attempt < maxRetries - 1) {
-          await sleep(2000);
-          continue;
+    // Guard: wait for session ready via WebSocket (or polling fallback)
+    const preStatus = await this.waitForStatus(this.sessionId, "idle", 60000, autoApprove);
+    if (preStatus === "running") {
+      if (autoApprove) {
+        // Wait a bit more and retry
+        await sleep(2000);
+        const retryStatus = await this.waitForStatus(this.sessionId, "idle", 58000, autoApprove);
+        if (retryStatus === "running") {
+          throw new Error(
+            `Session ${this.sessionId} is busy. Wait for the current turn to complete.`
+          );
         }
+      } else {
         throw new Error(
-          `Session ${this.sessionId} is busy (status: ${status}). ` +
-          `Wait for the current turn to complete before sending a new prompt. ` +
-          `Use poll_session to check progress.`
+          `Session ${this.sessionId} is busy (status: ${preStatus}). ` +
+          `Wait for the current turn to complete before sending a new prompt.`
         );
       }
-
-      break; // idle or unknown — proceed
     }
+
+    // Subscribe to this session if not already
+    this.wsSubscribe(this.sessionId);
 
     const resp = await this.apiPost<{ prompt_id: string }>(
       `/api/v1/sessions/${this.sessionId}/prompts`,
@@ -218,7 +471,7 @@ export class WireClient {
 
   /**
    * Send a prompt and wait for the complete response.
-   * By default, thinking content is excluded from finalText.
+   * Uses WebSocket push when available, falls back to polling.
    */
   async sendPrompt(
     prompt: string,
@@ -237,35 +490,27 @@ export class WireClient {
       throw new Error("No session ID set. Use list_sessions to find one.");
     }
 
-    // Step 0: Wait for session to become ready (idle).
-    // Submitting mid-turn with in-flight tool_calls causes the LLM provider
-    // to reject with 400 "insufficient tool messages following tool_calls".
-    {
-      const maxPreWait = Math.min(timeoutMs, 60000); // up to 60s pre-submit wait
-      const preWaitStart = Date.now();
-      while (Date.now() - preWaitStart < maxPreWait) {
-        const currentStatus = await this.getSessionStatus();
+    // Step 0: Wait for session ready via WebSocket push (or polling fallback)
+    const preStatus = await this.waitForStatus(this.sessionId, "idle", Math.min(timeoutMs, 60000), autoApprove);
 
-        if (currentStatus === "idle" || currentStatus === "unknown") break;
-
-        if (currentStatus === "awaiting_approval") {
-          if (!autoApprove) {
-            throw new Error(
-              `Session ${this.sessionId} is awaiting approval. ` +
-              `Enable auto_mode or approve manually before sending a new prompt.`
-            );
-          }
-          await this.approveAll(this.sessionId);
-          await sleep(500);
-          continue;
-        }
-
-        // "running" or other active state — wait
-        await sleep(1000);
+    if (preStatus === "awaiting_approval") {
+      if (!autoApprove) {
+        throw new Error(
+          `Session ${this.sessionId} is awaiting approval. ` +
+          `Enable auto_mode or approve manually before sending a new prompt.`
+        );
+      }
+      await this.approveAll(this.sessionId);
+      const afterApprove = await this.waitForStatus(this.sessionId, "idle", 10000, autoApprove);
+      if (afterApprove === "running") {
+        throw new Error(`Session is still busy after approval.`);
       }
     }
 
-    // Step 1: Submit prompt
+    // Subscribe to events
+    this.wsSubscribe(this.sessionId);
+
+    // Step 1: Submit prompt via REST
     const submitResp = await this.apiPost<{
       prompt_id: string;
       user_message_id: string;
@@ -276,90 +521,54 @@ export class WireClient {
     });
 
     const promptId = submitResp.prompt_id;
-    let lastMessageId = "";
 
+    // Step 2: Wait for status to return to idle via WebSocket (or polling)
+    const remainingTimeout = timeoutMs - 3000; // subtract the time spent above
+    const finalStatus = await this.waitForStatus(
+      this.sessionId,
+      "idle",
+      Math.max(remainingTimeout, 10000),
+      autoApprove
+    );
+
+    // Step 3: Fetch the response messages
+    const allMessages: KimiContentBlock[] = [];
     let finalText = "";
     let thinkingText = "";
-    const allMessages: KimiContentBlock[] = [];
 
-    // Step 2: Poll until idle, collecting messages
-    const startTime = Date.now();
-    const pollInterval = 1000;
+    try {
+      const msgsResp = await this.apiGet<{ items: KimiMessage[] }>(
+        `/api/v1/sessions/${this.sessionId}/messages?page_size=50&role=assistant`
+      );
 
-    while (Date.now() - startTime < timeoutMs) {
-      // Check session status
-      try {
-        const statusResp = await this.apiGet<{ status: string }>(
-          `/api/v1/sessions/${this.sessionId}/status`
-        );
-
-        // Auto-approve pending approvals if enabled
-        if (autoApprove && statusResp.status === "awaiting_approval") {
-          await this.approveAll(this.sessionId);
-        }
-
-        // Fetch new messages
-        const params = new URLSearchParams({
-          page_size: "30",
-          role: "assistant",
-        });
-        if (lastMessageId) {
-          params.set("after_id", lastMessageId);
-        }
-
-        const msgsResp = await this.apiGet<{ items: KimiMessage[] }>(
-          `/api/v1/sessions/${this.sessionId}/messages?${params}`
-        );
-
-        const items = msgsResp.items || [];
-        for (const msg of items) {
-          if (msg.id > lastMessageId) {
-            lastMessageId = msg.id;
+      for (const msg of (msgsResp.items || [])) {
+        for (const block of msg.content) {
+          allMessages.push(block);
+          if (block.type === "text" && block.text) {
+            finalText += block.text;
           }
-          for (const block of msg.content) {
-            allMessages.push(block);
-            if (block.type === "text" && block.text) {
-              finalText += block.text;
-            }
-            if (block.type === "thinking" && block.thinking) {
-              thinkingText += block.thinking;
-            }
+          if (block.type === "thinking" && block.thinking) {
+            thinkingText += block.thinking;
           }
         }
-
-        // Check if turn is complete
-        if (statusResp.status === "idle" && items.length > 0) {
-          // Verify we got a text response
-          const hasText = allMessages.some((b) => b.type === "text");
-          if (hasText || allMessages.length > 0) {
-            break;
-          }
-        }
-
-        // If still running and we haven't seen the prompt yet, wait longer first
-        if (statusResp.status === "running" && lastMessageId === "") {
-          await sleep(pollInterval * 2);
-        }
-      } catch {
-        // Ignore polling errors, continue
       }
-
-      await sleep(pollInterval);
+    } catch {
+      // Fetch failed — return what we have
     }
 
     return {
       promptId,
-      finalText: includeThinking ? finalText : finalText,
+      finalText,
       thinkingText,
       status: "completed",
       messages: allMessages,
     };
   }
 
-  /**
-   * Read thinking content for a specific turn.
-   * Useful when response is ambiguous and needs confirmation.
-   */
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // Utilities
+  // ═══════════════════════════════════════════════════════════════════════════════
+
   getThinkingFromMessages(messages: KimiContentBlock[]): string {
     return messages
       .filter((b) => b.type === "thinking" && b.thinking)
@@ -367,18 +576,17 @@ export class WireClient {
       .join("\n");
   }
 
-  /**
-   * Filter out thinking blocks, keeping only text and tool info.
-   */
   filterTextOnly(messages: KimiContentBlock[]): KimiContentBlock[] {
     return messages.filter((b) => b.type !== "thinking");
   }
 
-  /**
-   * Query the session status from the Kimi Server.
-   * Returns "idle", "running", "awaiting_approval", or "unknown" on error.
-   */
   async getSessionStatus(): Promise<string> {
+    // Fast path: WebSocket cache
+    const cached = this.sessionStateCache.get(this.sessionId);
+    if (cached && Date.now() - cached.updatedAt < 30000) {
+      return cached.status;
+    }
+    // Fallback: REST API
     try {
       const resp = await this.apiGet<{ status: string }>(
         `/api/v1/sessions/${this.sessionId}/status`
@@ -389,10 +597,12 @@ export class WireClient {
     }
   }
 
-  /**
-   * Auto-approve all pending approval requests for a session.
-   * Uses session-scoped approval to enable auto mode for the entire session.
-   */
+  /** Get cached status for any session (WebSocket push). Returns null if never seen. */
+  getCachedStatus(sessionId: string): string | null {
+    const cached = this.sessionStateCache.get(sessionId);
+    return cached?.status || null;
+  }
+
   private async approveAll(sessionId: string): Promise<void> {
     try {
       const approvalsResp = await this.apiGet<{
@@ -410,13 +620,24 @@ export class WireClient {
         );
       }
     } catch {
-      // Ignore approval errors — session may not have pending approvals
+      // Ignore approval errors
     }
   }
 
   async close(): Promise<void> {
     this.connected = false;
+    if (this.wsReconnectTimer) {
+      clearTimeout(this.wsReconnectTimer);
+    }
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
   }
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // REST helpers
+  // ═══════════════════════════════════════════════════════════════════════════════
 
   private async apiGet<T>(path: string): Promise<T> {
     const url = `${this.baseUrl}${path}`;

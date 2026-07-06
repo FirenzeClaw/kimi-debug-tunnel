@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { listSessions } from "../session-manager.js";
+import { listSessions } from "../session-store.js";
 
 export function registerListSessions(server: McpServer): void {
   server.tool(
