@@ -1,8 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { WireClient } from "./wire-client.js";
-import { MessageQueue } from "./message-queue.js";
-import { WorkflowEngine } from "./workflow-engine.js";
 import type { TunnelServices } from "./types.js";
 
 import { registerListSessions } from "./tools/list-sessions.js";
@@ -22,19 +19,13 @@ import { registerListTemplates } from "./tools/list-workflow-templates.js";
 import { registerContinueWorkflow } from "./tools/continue-workflow.js";
 import { registerWatchSession, registerGetWatchResult, registerContinueWatch, registerSetWatchOutput } from "./tools/session-watch.js";
 
-const server = new McpServer({
-  name: "kimi-debug-tunnel",
-  version: "2.0.0",
-  description:
-    "Kimi Code CLI 调试隧道 v2——通过 WebSocket Wire 协议实现推送式全自动化 session 统筹。支持多轮对话编排、实时流式响应、智能思考过滤。",
-});
-
-function createServer(): { server: typeof server; services: TunnelServices } {
-  const wireClient = new WireClient();
-  const messageQueue = new MessageQueue();
-  const wireClientFactory = { create: () => new WireClient() };
-  const workflowEngine = new WorkflowEngine({ wireClient, messageQueue, startTime: Date.now(), wireClientFactory });
-  const services: TunnelServices = { wireClient, messageQueue, startTime: Date.now(), workflowEngine, wireClientFactory };
+export async function startMcpServer(services: TunnelServices): Promise<void> {
+  const server = new McpServer({
+    name: "kimi-debug-tunnel",
+    version: "2.0.0",
+    description:
+      "Kimi Code CLI 调试隧道 v2——通过 WebSocket Wire 协议实现推送式全自动化 session 统筹。支持多轮对话编排、实时流式响应、智能思考过滤。",
+  });
 
   registerCreateSession(server, services);
   registerExecutePrompt(server, services);
@@ -42,14 +33,14 @@ function createServer(): { server: typeof server; services: TunnelServices } {
   registerRunFlow(server, services);
   registerStreamResponse(server, services);
 
-  registerListSessions(server);
-  registerGetSessionInfo(server);
-  registerReadSessionLog(server);
-  registerListIORecords(server);
+  registerListSessions(server, services);
+  registerGetSessionInfo(server, services);
+  registerReadSessionLog(server, services);
+  registerListIORecords(server, services);
   registerPollSession(server, services);
 
-  registerLearnWorkflow(server);
-  registerListTemplates(server);
+  registerLearnWorkflow(server, services);
+  registerListTemplates(server, services);
   registerExecuteWorkflow(server, services);
   registerContinueWorkflow(server, services);
   registerWatchSession(server, services);
@@ -59,15 +50,7 @@ function createServer(): { server: typeof server; services: TunnelServices } {
 
   registerGetTunnelStatus(server, services);
 
-  return { server, services };
-}
-
-export async function startMcpServer(): Promise<TunnelServices> {
-  const { services } = createServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
   process.stderr.write("[kimi-debug-tunnel] MCP server connected via stdio\n");
-  return services;
 }
-
-export { server };

@@ -1,7 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { TunnelServices } from "../types.js";
 import { listTemplates } from "../workflow-store.js";
 
-export function registerListTemplates(server: McpServer): void {
+export function registerListTemplates(server: McpServer, _services?: TunnelServices): void {
   server.tool(
     "list_templates",
     "列出所有可用的工作流模板。返回模板名称、版本、步骤数、描述。",

@@ -2,10 +2,6 @@ import type { WireClient } from "./wire-client.js";
 import type { MessageQueue } from "./message-queue.js";
 import type { WorkflowResult, BlockageEvent } from "./workflow-template.js";
 
-export interface WireClientFactory {
-  create(): WireClient;
-}
-
 export interface WorkflowProgress {
   template: string;
   currentStep: number;
@@ -35,5 +31,4 @@ export interface TunnelServices {
   messageQueue: MessageQueue;
   startTime: number;
   workflowEngine?: IWorkflowEngine;
-  wireClientFactory: WireClientFactory;
 }

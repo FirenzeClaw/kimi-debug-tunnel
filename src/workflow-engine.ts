@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { TunnelServices, WorkflowProgress, WireClientFactory } from "./types.js";
+import type { WorkflowProgress } from "./types.js";
 import { WireClient } from "./wire-client.js";
 import type { MessageQueue } from "./message-queue.js";
 import type {
@@ -13,7 +13,6 @@ import type {
 } from "./workflow-template.js";
 
 // ── Ambiguity Detection ─────────────────────────────────────────────────────────
-// Reuses the same pattern from session-orchestrator.ts
 
 const AMBIGUOUS_PATTERNS: RegExp[] = [
   /不确定/i,
@@ -102,29 +101,30 @@ function detectBlockage(
 
 // ── Engine ──────────────────────────────────────────────────────────────────────
 
-export class WorkflowEngine {
-  private messageQueue: MessageQueue;
-  private wireClientFactory: WireClientFactory;
-  private activeExecutions = new Map<string, {
-    executionId: string;
-    template: WorkflowTemplate;
-    sessionId: string;
-    currentStepIndex: number;
-    stepResults: StepResult[];
-    status: ExecutionStatus;
-    autoMode: boolean;
-    wireClient: WireClient;
-    onProgress?: (progress: WorkflowProgress) => void;
-  }>();
+interface ActiveExecution {
+  executionId: string;
+  template: WorkflowTemplate;
+  sessionId: string;
+  currentStepIndex: number;
+  stepResults: StepResult[];
+  status: ExecutionStatus;
+  autoMode: boolean;
+  onProgress?: (progress: WorkflowProgress) => void;
+}
 
-  constructor(services: TunnelServices) {
-    this.messageQueue = services.messageQueue;
-    this.wireClientFactory = services.wireClientFactory;
+export class WorkflowEngine {
+  private wireClient: WireClient;
+  private messageQueue: MessageQueue;
+  private activeExecutions = new Map<string, ActiveExecution>();
+
+  constructor(wireClient: WireClient, messageQueue: MessageQueue) {
+    this.wireClient = wireClient;
+    this.messageQueue = messageQueue;
   }
 
   /**
    * Execute a workflow template against a new task session.
-   * Creates a dedicated WireClient per execution to avoid polluting shared state.
+   * Uses the shared WireClient, saving/restoring its original sessionId around execution.
    */
   async execute(
     template: WorkflowTemplate,
@@ -138,22 +138,19 @@ export class WorkflowEngine {
     const { autoMode, onProgress, model, thinking } = options;
     const executionId = randomUUID();
     const startTime = Date.now();
+    const originalSessionId = this.wireClient.getSessionId();
 
     const stepResults: StepResult[] = [];
     let status: ExecutionStatus = "running";
 
-    // Dedicated WireClient for this workflow execution
-    const wireClient = this.wireClientFactory.create();
-    try {
-      await wireClient.connect();
-    } catch (err) {
+    if (!this.wireClient.isConnected()) {
       return {
         executionId,
         template: template.name,
         sessionId: "",
         status: "failed" as ExecutionStatus,
         steps: [],
-        summary: `Cannot connect to Kimi Server: ${(err as Error).message}`,
+        summary: "Wire client not connected to Kimi Server",
         totalDuration: Date.now() - startTime,
         nextStepOptions: ["retry", "abort"],
       };
@@ -162,7 +159,7 @@ export class WorkflowEngine {
     // ── Create task session ──────────────────────────────────────────────────
     let sessionId: string;
     try {
-      const created = await wireClient.createSession({
+      const created = await this.wireClient.createSession({
         cwd: template.projectCwd,
         title: `[WF] ${template.name}`,
         permissionMode: autoMode ? "auto" : "manual",
@@ -184,16 +181,17 @@ export class WorkflowEngine {
         timestamp: new Date().toISOString(),
       });
     } catch (err) {
-      status = "failed";
+      // Restore original session on failure
+      if (originalSessionId) this.wireClient.setSessionId(originalSessionId);
       return {
         executionId,
         template: template.name,
         sessionId: "",
-        status,
+        status: "failed",
         steps: stepResults,
         summary: `Failed to create session: ${(err as Error).message}`,
         totalDuration: Date.now() - startTime,
-        nextStepOptions: this.buildNextStepOptions(status),
+        nextStepOptions: this.buildNextStepOptions("failed"),
       };
     }
 
@@ -202,7 +200,6 @@ export class WorkflowEngine {
       for (let i = 0; i < template.steps.length; i++) {
         const step = template.steps[i];
         const result = await this.driveStep(
-          wireClient,
           sessionId,
           step,
           i,
@@ -213,11 +210,9 @@ export class WorkflowEngine {
         stepResults.push(result);
 
         if (result.status === "blocked") {
-          // Check if any blockage needs user decision
           const unresolvedBlockage = result.blockages.find((b) => b.needsUserDecision);
           if (unresolvedBlockage) {
             status = "awaiting_user";
-            // Store execution state for later resume
             this.activeExecutions.set(executionId, {
               executionId,
               template,
@@ -226,12 +221,10 @@ export class WorkflowEngine {
               stepResults,
               status: "awaiting_user",
               autoMode,
-              wireClient,
               onProgress,
             });
             break;
           }
-          // Auto-resolved blockages: continue to next step
         }
 
         if (result.status === "failed") {
@@ -261,11 +254,13 @@ export class WorkflowEngine {
     const totalDuration = Date.now() - startTime;
     const summary = this.buildSummary(template.name, stepResults, status, totalDuration);
 
-    // Clean up: remove terminal executions, close dedicated WireClient
+    // Restore original session
+    if (originalSessionId) this.wireClient.setSessionId(originalSessionId);
+
+    // Clean up: remove terminal executions
     if (status !== "awaiting_user") {
       this.activeExecutions.delete(executionId);
     }
-    await wireClient.close();
 
     this.messageQueue.broadcastJson({
       type: "workflow_complete",
@@ -294,7 +289,6 @@ export class WorkflowEngine {
   // ── Step Driver ──────────────────────────────────────────────────────────────
 
   private async driveStep(
-    wireClient: WireClient,
     sessionId: string,
     step: WorkflowStep,
     stepIndex: number,
@@ -313,7 +307,7 @@ export class WorkflowEngine {
 
       try {
         // Send instruction and wait for response
-        const response = await wireClient.sendPrompt(step.instruction, {
+        const response = await this.wireClient.sendPrompt(step.instruction, {
           timeoutMs: template.timeout.perStep,
           autoApprove: autoMode,
         });
@@ -337,7 +331,6 @@ export class WorkflowEngine {
         });
 
         // Classify response
-        // Check for explicit completion
         if (/\[DONE\]|✅|任务完成|全部完成/i.test(lastResponse)) {
           return {
             stepId: step.id,
@@ -360,17 +353,13 @@ export class WorkflowEngine {
 
         if (blockage) {
           if (blockage.resolved && !blockage.needsUserDecision) {
-            // Auto-resolved: re-instruct with resolution
             blockages.push(blockage);
             if (attempt <= maxRetries) {
-              // Adjust instruction with resolution info
               const adjustedInstruction = `${step.instruction}\n\n[上一步遇到问题: ${blockage.context.slice(0, 200)}]\n${blockage.resolution}`;
-              // Override instruction for retry by using sendPrompt
-              await wireClient.sendPrompt(adjustedInstruction, {
+              await this.wireClient.sendPrompt(adjustedInstruction, {
                 timeoutMs: template.timeout.perStep,
                 autoApprove: autoMode,
               });
-              // After re-instruct, continue the loop for the next attempt
               continue;
             }
             return {
@@ -384,7 +373,6 @@ export class WorkflowEngine {
               blockages,
             };
           } else {
-            // Unresolvable blockage
             blockages.push(blockage);
             this.pushProgress(onProgress, {
               template: template.name,
@@ -418,10 +406,8 @@ export class WorkflowEngine {
 
         // Check for ambiguity
         if (isAmbiguous(lastResponse)) {
-          // Read thinking chain for confirmation
           if (response.thinkingText) {
             thinkingSummary = summarizeThinking(response.thinkingText);
-            // If thinking is clear, proceed
             if (thinkingSummary.length > 50) {
               return {
                 stepId: step.id,
@@ -436,7 +422,6 @@ export class WorkflowEngine {
             }
           }
 
-          // Still ambiguous — mark as adjusted but proceed
           return {
             stepId: step.id,
             stepIndex,
@@ -463,7 +448,6 @@ export class WorkflowEngine {
       } catch (err) {
         const errMsg = (err as Error).message;
 
-        // Timeout handling
         if (errMsg.includes("timeout") || errMsg.includes("timed out")) {
           if (attempt <= maxRetries) {
             blockages.push({
@@ -529,7 +513,6 @@ export class WorkflowEngine {
     if (onProgress) {
       onProgress(progress);
     }
-    // Also broadcast via WebSocket
     this.messageQueue.broadcastJson({
       type: "workflow_progress",
       ...progress,
@@ -567,11 +550,6 @@ export class WorkflowEngine {
 
   // ── Public: Handle Blockage ─────────────────────────────────────────────────
 
-  /**
-   * Handle a blockage event for a paused workflow execution.
-   * decision: "retry" | "skip" | "abort" | "manual"
-   * instruction: only used with "manual" — replaces the current step's instruction.
-   */
   async handleBlockage(
     executionId: string,
     decision: "retry" | "skip" | "abort" | "manual",
@@ -580,21 +558,19 @@ export class WorkflowEngine {
     const state = this.activeExecutions.get(executionId);
     if (!state) return null;
 
-    const { template, sessionId, currentStepIndex, stepResults, autoMode, wireClient, onProgress } = state;
+    const { template, sessionId, currentStepIndex, stepResults, autoMode, onProgress } = state;
     const startTime = Date.now();
 
     switch (decision) {
       case "retry": {
-        // Re-run current step
         const step = template.steps[currentStepIndex];
         const result = await this.driveStep(
-          wireClient, sessionId, step, currentStepIndex, template, autoMode, onProgress
+          sessionId, step, currentStepIndex, template, autoMode, onProgress
         );
         stepResults[currentStepIndex] = result;
-        return await this.resumeExecution(executionId, sessionId, currentStepIndex + 1, template, stepResults, autoMode, wireClient, onProgress, startTime);
+        return await this.resumeExecution(executionId, sessionId, currentStepIndex + 1, template, stepResults, autoMode, onProgress, startTime);
       }
       case "skip": {
-        // Skip current step, mark as adjusted
         const step = template.steps[currentStepIndex];
         stepResults.push({
           stepId: step.id,
@@ -606,7 +582,7 @@ export class WorkflowEngine {
           adjustment: "User skipped this step",
           blockages: [],
         });
-        return await this.resumeExecution(executionId, sessionId, currentStepIndex + 1, template, stepResults, autoMode, wireClient, onProgress, startTime);
+        return await this.resumeExecution(executionId, sessionId, currentStepIndex + 1, template, stepResults, autoMode, onProgress, startTime);
       }
       case "abort": {
         this.activeExecutions.delete(executionId);
@@ -622,23 +598,19 @@ export class WorkflowEngine {
         };
       }
       case "manual": {
-        // Replace current step's instruction with user-provided one
         const step = template.steps[currentStepIndex];
         const manualInstruction = options.instruction || step.instruction;
         const result = await this.driveStep(
-          wireClient, sessionId,
+          sessionId,
           { ...step, instruction: manualInstruction },
           currentStepIndex, template, autoMode, onProgress
         );
         stepResults[currentStepIndex] = result;
-        return await this.resumeExecution(executionId, sessionId, currentStepIndex + 1, template, stepResults, autoMode, wireClient, onProgress, startTime);
+        return await this.resumeExecution(executionId, sessionId, currentStepIndex + 1, template, stepResults, autoMode, onProgress, startTime);
       }
     }
   }
 
-  /**
-   * Get the current state of a workflow execution.
-   */
   getExecution(executionId: string): {
     executionId: string;
     template: string;
@@ -661,9 +633,6 @@ export class WorkflowEngine {
     };
   }
 
-  /**
-   * Find an active execution by session ID.
-   */
   getFlow(sessionId: string): {
     executionId: string;
     status: ExecutionStatus;
@@ -692,7 +661,6 @@ export class WorkflowEngine {
     template: WorkflowTemplate,
     stepResults: StepResult[],
     autoMode: boolean,
-    wireClient: WireClient,
     onProgress: ((p: WorkflowProgress) => void) | undefined,
     startTime: number
   ): Promise<WorkflowResult> {
@@ -702,7 +670,7 @@ export class WorkflowEngine {
       for (let i = startStep; i < template.steps.length; i++) {
         const step = template.steps[i];
         const result = await this.driveStep(
-          wireClient, sessionId, step, i, template, autoMode, onProgress
+          sessionId, step, i, template, autoMode, onProgress
         );
         stepResults.push(result);
 
@@ -713,7 +681,7 @@ export class WorkflowEngine {
             this.activeExecutions.set(executionId, {
               executionId, template, sessionId,
               currentStepIndex: i, stepResults,
-              status: "awaiting_user", autoMode, wireClient, onProgress,
+              status: "awaiting_user", autoMode, onProgress,
             });
             break;
           }
@@ -731,7 +699,6 @@ export class WorkflowEngine {
       status = "failed";
     }
 
-    // Clean up completed/failed executions
     if (status !== "awaiting_user") {
       this.activeExecutions.delete(executionId);
     }
@@ -764,7 +731,7 @@ export class WorkflowEngine {
   }
 }
 
-// ── Thinking summarization (reused from session-orchestrator) ───────────────────
+// ── Thinking summarization ──────────────────────────────────────────────────────
 
 function summarizeThinking(thinking: string): string {
   const lines = thinking.split("\n");

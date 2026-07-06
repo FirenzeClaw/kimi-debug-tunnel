@@ -119,6 +119,18 @@ npm run inspector    # MCP Inspector 调试模式
 
 全自动 session 编排的标准流程：
 
+### MCP 工具使用规则（必读）
+
+> **核心原则**：向任务 session 提交 prompt 后，**必须使用 Bash 后台任务轮询等待回执**，绝不在当前 turn 内阻塞等待。
+
+| 规则 | 说明 |
+|------|------|
+| **即发即返** | `execute_prompt` / `chat_with_session` / `run_flow` 默认 `wait=false`，立即返回 `{ submitted: true }` |
+| **后台轮询** | 提交后用 `Bash(run_in_background=true)` 启动 `while` 循环，curl poll session status |
+| **零 token 等待** | 后台 bash 进程由 OS 管理，不消耗当前 turn 的 token，退出时 runtime 注入 `<notification>` |
+| **禁止阻塞** | 绝不用 `execute_prompt(wait=true)` 或同步 `while` 循环阻塞当前 turn——MCP 超时会截断 |
+| **禁止重复查** | 不在同一 turn 内多次调用 `list_io_records` / `poll_session` 手动轮询——浪费 token |
+
 ### 推荐：Bash 后台 REST 轮询（零 token 等待）
 
 ```
@@ -127,9 +139,23 @@ npm run inspector    # MCP Inspector 调试模式
    → { submitted: true }
 
 ③ Bash(run_in_background=true):
+   PY=$(which python3 2>/dev/null || which python 2>/dev/null || echo python)
    while true; do
-     status=$(curl /sessions/$SID/status)
-     if idle → curl /sessions/$SID/messages → 输出结果; break
+     STATUS=$(curl -s -H "Authorization: Bearer $KIMI_SERVER_TOKEN" \
+       "http://127.0.0.1:5494/api/v1/sessions/$SID/status" | \
+       $PY -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('status',''))")
+     if [ "$STATUS" = "idle" ] || [ "$STATUS" = "aborted" ]; then
+       curl -s -H "Authorization: Bearer $KIMI_SERVER_TOKEN" \
+         "http://127.0.0.1:5494/api/v1/sessions/$SID/messages?page_size=5&role=assistant" | \
+         $PY -c "
+import sys,json
+data=json.load(sys.stdin)['data']
+for m in data.get('items',[]):
+  for b in m.get('content',[]):
+    if b.get('type')=='text': print(b['text']); break
+"
+       break
+     fi
      sleep 2
    done
 
@@ -174,3 +200,15 @@ npm run inspector    # MCP Inspector 调试模式
 | `done` | turn 完成 (end_turn) | 工作流结束 |
 | `error` | 检测到错误 | 查看 log |
 | `idle` | 空闲等待中 | 可能卡住 |
+
+## Agent Skills
+
+本项目配套 3 个 Agent skill，安装到 `~/.agents/skills/` 后自动生效：
+
+| Skill | 用途 | 文件 |
+|-------|------|------|
+| `kimi-debug-tunnel` | MCP 工具完整使用规范——即发即返、后台轮询、工具速查、红线规则 | `skills/kimi-debug-tunnel.md` |
+| `agent-session-monitor` | 通过 wire.jsonl 尾部日志推断 session 运行状态（无需 API 认证） | `skills/agent-session-monitor.md` |
+| `mcp-async-tool` | MCP 异步工具设计模式——解决 >30s 任务被协议超时截断的问题 | `skills/mcp-async-tool.md` |
+
+**安装**：将 `skills/*.md` 复制到 `~/.agents/skills/<name>/SKILL.md`，新 session 自动加载。

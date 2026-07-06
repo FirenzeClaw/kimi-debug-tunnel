@@ -1,11 +1,12 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { TunnelServices } from "../types.js";
 import { listIORecords } from "../session-log-reader.js";
 import { saveTemplate } from "../workflow-store.js";
 import type { WorkflowTemplate, WorkflowStep } from "../workflow-template.js";
 import { validateTemplate } from "../workflow-template.js";
 
-export function registerLearnWorkflow(server: McpServer): void {
+export function registerLearnWorkflow(server: McpServer, _services?: TunnelServices): void {
   server.tool(
     "learn_workflow",
     "从口头描述或历史 session 中学习工作流，生成可复用的 YAML 模板。",

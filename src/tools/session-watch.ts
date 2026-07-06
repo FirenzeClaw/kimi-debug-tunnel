@@ -79,7 +79,7 @@ export function registerContinueWatch(server: McpServer, services: TunnelService
     },
     async ({ watch_id, next_instruction }) => {
       const w = getWatcher(services);
-      const result = w.continueWatch(watch_id, next_instruction);
+      const result = await w.continueWatch(watch_id, next_instruction);
 
       if (!result) {
         return {

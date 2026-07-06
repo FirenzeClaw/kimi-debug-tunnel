@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { TunnelServices } from "../types.js";
+import { generatePollCommand } from "../poll-command.js";
 
 /**
  * Legacy tool — now delegates to execute_prompt.
@@ -32,7 +33,8 @@ export function registerChatWithSession(server: McpServer, services: TunnelServi
         return {
           content: [{ type: "text", text: JSON.stringify({
             submitted: true, session_id, prompt_id: promptId,
-            hint: "任务已提交。用 poll_session / list_io_records 跟踪进度。",
+            hint: "任务已提交。将 poll_command 以 Bash(run_in_background=true) 执行，等待回执。",
+            poll_command: generatePollCommand({ sessionId: session_id }),
           }, null, 2) }],
         };
       } catch (err) {

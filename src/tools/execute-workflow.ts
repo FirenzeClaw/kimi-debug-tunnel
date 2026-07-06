@@ -71,8 +71,8 @@ export function registerExecuteWorkflow(server: McpServer, services: TunnelServi
         }
       }
 
-      // Run engine
-      const engine = new WorkflowEngine(services);
+      // Run engine (shared wireClient from services)
+      const engine = new WorkflowEngine(wireClient, services.messageQueue);
 
       // Start execution (async, non-blocking for the tool)
       // The engine will push progress via WebSocket

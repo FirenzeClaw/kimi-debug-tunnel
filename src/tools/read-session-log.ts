@@ -1,8 +1,9 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { TunnelServices } from "../types.js";
 import { readSessionLog } from "../session-log-reader.js";
 
-export function registerReadSessionLog(server: McpServer): void {
+export function registerReadSessionLog(server: McpServer, _services?: TunnelServices): void {
   server.tool(
     "read_session_log",
     "读取指定 session 的对话日志。返回最近的消息条目、最后一条用户 prompt、最后一条助手回复、最近调用的工具、以及当前 turn 是否已完成。用于多轮编排时检测目标 session 的处理状态。",

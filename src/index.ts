@@ -14,9 +14,8 @@ async function main(): Promise<void> {
 
   const wireClient = new WireClient();
   const messageQueue = new MessageQueue();
-  const wireClientFactory = { create: () => new WireClient() };
-  const workflowEngine = new WorkflowEngine({ wireClient, messageQueue, startTime: Date.now(), wireClientFactory });
-  const services: TunnelServices = { wireClient, messageQueue, startTime: Date.now(), workflowEngine, wireClientFactory };
+  const workflowEngine = new WorkflowEngine(wireClient, messageQueue);
+  const services: TunnelServices = { wireClient, messageQueue, startTime: Date.now(), workflowEngine };
 
   // Start HTTP + WebSocket server for external clients
   startHttpServer(PORT, services);
@@ -51,7 +50,7 @@ async function main(): Promise<void> {
   }
 
   // Start MCP stdio server for Kimi Code CLI
-  startMcpServer().catch((err) => {
+  startMcpServer(services).catch((err) => {
     process.stderr.write(
       `[kimi-debug-tunnel] MCP server failed: ${err.message}\n`
     );

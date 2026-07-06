@@ -12,6 +12,7 @@ import { randomUUID } from "node:crypto";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { WebSocket } from "ws";
+import { WireTransport } from "./wire-transport.js";
 
 interface KimiContentBlock {
   type: "text" | "thinking" | "tool_use" | "tool_result";
@@ -29,13 +30,6 @@ interface KimiMessage {
   role: "user" | "assistant" | "system";
   content: KimiContentBlock[];
   created_at: string;
-}
-
-interface KimiApiResponse<T> {
-  code: number;
-  msg: string;
-  data: T;
-  request_id: string;
 }
 
 export interface TurnPromptResponse {
@@ -84,6 +78,9 @@ export class WireClient {
   private sessionId: string;
   private connected = false;
 
+  // Transport layer (REST calls)
+  private transport: WireTransport;
+
   // WebSocket push layer
   private ws: WebSocket | null = null;
   private wsUrl: string;
@@ -107,6 +104,7 @@ export class WireClient {
     this.sessionId = sessionId || "";
     this.wsUrl = this.baseUrl.replace(/^http/, "ws") + "/api/v1/ws";
     this.wsClientId = "tunnel-" + randomUUID().slice(0, 8);
+    this.transport = new WireTransport({ baseUrl: this.baseUrl, token: this.token });
   }
 
   setSessionId(sessionId: string): void {
@@ -124,6 +122,7 @@ export class WireClient {
 
   setToken(token: string): void {
     this.token = token;
+    this.transport.token = token;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════════
@@ -146,7 +145,7 @@ export class WireClient {
       (body.agent_config as Record<string, unknown>).thinking = options.thinking;
     }
 
-    const resp = await this.apiPost<{ id: string; title: string }>(
+    const resp = await this.transport.apiPost<{ id: string; title: string }>(
       "/api/v1/sessions",
       body
     );
@@ -154,8 +153,8 @@ export class WireClient {
       `[wire-client] Created session ${resp.id} (cwd: ${options.cwd}, permission: ${options.permissionMode || "default"})\n`
     );
 
-    // Auto mode is applied per-prompt via the REST API's permission_mode field.
-    // We no longer inject /auto as a text prompt — that triggered unwanted LLM processing.
+    // Update internal sessionId so subsequent API calls target this session
+    this.sessionId = resp.id;
 
     return { sessionId: resp.id, title: resp.title };
   }
@@ -172,7 +171,7 @@ export class WireClient {
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        const metaResp = await this.apiGet<{
+        const metaResp = await this.transport.apiGet<{
           server_version: string;
           capabilities: Record<string, boolean>;
         }>("/api/v1/meta");
@@ -384,7 +383,7 @@ export class WireClient {
         const status = (await this.getSessionStatus()) || "unknown";
         if (status === "idle" || status === "aborted") {
           // Fetch messages to get the result
-          const msgs = await this.apiGet<{ items: Array<{ content: Array<{ type: string; text?: string }> }> }>(
+          const msgs = await this.transport.apiGet<{ items: Array<{ content: Array<{ type: string; text?: string }> }> }>(
             `/api/v1/sessions/${this.sessionId}/messages?page_size=3&role=assistant`
           );
           const items = msgs?.items || [];
@@ -527,7 +526,7 @@ export class WireClient {
       body.permission_mode = "auto";
     }
 
-    const resp = await this.apiPost<{ prompt_id: string }>(
+    const resp = await this.transport.apiPost<{ prompt_id: string }>(
       `/api/v1/sessions/${this.sessionId}/prompts`,
       body
     );
@@ -576,7 +575,7 @@ export class WireClient {
     this.wsSubscribe(this.sessionId);
 
     // Step 1: Submit prompt via REST
-    const submitResp = await this.apiPost<{
+    const submitResp = await this.transport.apiPost<{
       prompt_id: string;
       user_message_id: string;
       status: string;
@@ -603,7 +602,7 @@ export class WireClient {
     let thinkingText = "";
 
     try {
-      const msgsResp = await this.apiGet<{ items: KimiMessage[] }>(
+      const msgsResp = await this.transport.apiGet<{ items: KimiMessage[] }>(
         `/api/v1/sessions/${this.sessionId}/messages?page_size=50&role=assistant`
       );
 
@@ -654,7 +653,7 @@ export class WireClient {
     }
     // Fallback: REST API
     try {
-      const resp = await this.apiGet<{ status: string }>(
+      const resp = await this.transport.apiGet<{ status: string }>(
         `/api/v1/sessions/${this.sessionId}/status`
       );
       return resp.status || "unknown";
@@ -671,13 +670,13 @@ export class WireClient {
 
   private async approveAll(sessionId: string): Promise<void> {
     try {
-      const approvalsResp = await this.apiGet<{
+      const approvalsResp = await this.transport.apiGet<{
         items: Array<{ approval_id: string }>;
       }>(`/api/v1/sessions/${sessionId}/approvals?status=pending`);
 
       const items = approvalsResp.items || [];
       for (const item of items) {
-        await this.apiPost(
+        await this.transport.apiPost(
           `/api/v1/sessions/${sessionId}/approvals/${item.approval_id}`,
           { decision: "approved", scope: "session" }
         );
@@ -705,52 +704,15 @@ export class WireClient {
     }
   }
 
-  // REST helpers (public for watcher use)
+  // REST helpers (delegated to WireTransport)
   // ═══════════════════════════════════════════════════════════════════════════════
 
   async apiGet<T>(path: string): Promise<T> {
-    const url = `${this.baseUrl}${path}`;
-    const headers: Record<string, string> = {
-      Accept: "application/json",
-    };
-    if (this.token) {
-      headers["Authorization"] = `Bearer ${this.token}`;
-    }
-
-    const resp = await fetch(url, { headers });
-    if (!resp.ok) {
-      throw new Error(`API GET ${path} failed: ${resp.status}`);
-    }
-    const json: KimiApiResponse<T> = await resp.json();
-    if (json.code !== 0) {
-      throw new Error(`API error: ${json.msg} (code ${json.code})`);
-    }
-    return json.data;
+    return this.transport.apiGet<T>(path);
   }
 
-  private async apiPost<T>(path: string, body: unknown): Promise<T> {
-    const url = `${this.baseUrl}${path}`;
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    };
-    if (this.token) {
-      headers["Authorization"] = `Bearer ${this.token}`;
-    }
-
-    const resp = await fetch(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-    });
-    if (!resp.ok) {
-      throw new Error(`API POST ${path} failed: ${resp.status}`);
-    }
-    const json: KimiApiResponse<T> = await resp.json();
-    if (json.code !== 0) {
-      throw new Error(`API error: ${json.msg} (code ${json.code})`);
-    }
-    return json.data;
+  async apiPost<T>(path: string, body: unknown): Promise<T> {
+    return this.transport.apiPost<T>(path, body);
   }
 }
 

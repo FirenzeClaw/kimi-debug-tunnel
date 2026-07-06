@@ -1,8 +1,9 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { TunnelServices } from "../types.js";
 import { listIORecords } from "../session-log-reader.js";
 
-export function registerListIORecords(server: McpServer): void {
+export function registerListIORecords(server: McpServer, _services?: TunnelServices): void {
   server.tool(
     "list_io_records",
     "快速列出 session 的输入输出记录。仅提取用户 prompt 和助手文本回复，过滤所有 tool_call/thinking/step_end 噪音。用于快速了解对话流程。",

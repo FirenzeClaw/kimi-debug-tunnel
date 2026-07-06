@@ -34,8 +34,8 @@ export function registerRunFlow(server: McpServer, services: TunnelServices): vo
         timeout: { perStep: 600000, total: 3600000 },
       };
 
-      // Fire-and-forget via WorkflowEngine (dedicated WireClient via factory)
-      const engine = services.workflowEngine || new WorkflowEngine(services);
+      // Fire-and-forget via WorkflowEngine (shared wireClient)
+      const engine = services.workflowEngine || new WorkflowEngine(wireClient, services.messageQueue);
       engine.execute(template, { autoMode: auto_mode, model, thinking })
         .then(r => process.stderr.write(`[run-flow] ${r.template} ${r.status}\n`))
         .catch(e => process.stderr.write(`[run-flow] error: ${e.message}\n`));
@@ -45,7 +45,7 @@ export function registerRunFlow(server: McpServer, services: TunnelServices): vo
           type: "text",
           text: JSON.stringify({
             submitted: true, cwd, auto_mode, total_steps: steps.length,
-            hint: "流程已启动。用 poll_session 跟踪进度。",
+            hint: "流程已启动，任务 session 正在创建（标题 [WF] run-flow-*）。用 list_sessions 找到新 session 后，以 Bash(run_in_background=true) 执行 poll_command 等待回执。",
           }, null, 2),
         }],
       };

@@ -60,16 +60,20 @@ export class SessionWatcher {
    * Complete a loop iteration: if the current watch is done, return its result
    * and optionally submit a next instruction + start a new watch.
    * Returns null if still watching.
+   *
+   * When nextInstruction is provided, submits the prompt first (await),
+   * then starts a new watch — guaranteeing the watch captures the new turn,
+   * not a stale completion event.
    */
-  continueWatch(
+  async continueWatch(
     watchId: string,
     nextInstruction?: string
-  ): {
+  ): Promise<{
     ready: boolean;
     result?: string | null;
     next_watch_id?: string;
     error?: string | null;
-  } | null {
+  } | null> {
     const entry = this.watches.get(watchId);
     if (!entry) return { ready: false, error: "watch not found" };
     if (entry.status === "watching") return null; // not ready yet
@@ -83,30 +87,26 @@ export class SessionWatcher {
       error: entry.error,
     };
 
-    // Auto-submit next instruction and start watching
+    // Auto-submit next instruction and start watching (now properly sequenced)
     if (nextInstruction) {
       const sessionId = entry.sessionId;
-      // Save original session and switch to task session
       const originalSession = this.wireClient.getSessionId();
-      this.wireClient.setSessionId(sessionId);
 
-      // Submit next instruction asynchronously
-      this.wireClient.submitPrompt(nextInstruction, { autoApprove: true })
-        .then(() => {
-          // Start watching the new turn
-          const newId = this.watch(sessionId);
-          // Store the new watch ID... but we can't return it from an async callback
-          // So we handle this synchronously below
-        })
-        .catch((err) => {
-          process.stderr.write(`[session-watcher] continue submit failed: ${err.message}\n`);
-        });
-
-      this.wireClient.setSessionId(originalSession);
-
-      // Start watching immediately (the submit happens above, but we start watching now)
-      const newWatchId = this.watch(sessionId);
-      return { ...response, next_watch_id: newWatchId };
+      try {
+        this.wireClient.setSessionId(sessionId);
+        // Wait for submission to complete before starting to watch
+        await this.wireClient.submitPrompt(nextInstruction, { autoApprove: true });
+        // Now safe to start watching — the new turn is in flight
+        const newWatchId = this.watch(sessionId);
+        return { ...response, next_watch_id: newWatchId };
+      } catch (err) {
+        process.stderr.write(`[session-watcher] continue submit failed: ${(err as Error).message}\n`);
+        // Even on failure, try watching (the prompt may have been injected mid-turn)
+        const newWatchId = this.watch(sessionId);
+        return { ...response, next_watch_id: newWatchId };
+      } finally {
+        this.wireClient.setSessionId(originalSession);
+      }
     }
 
     return response;

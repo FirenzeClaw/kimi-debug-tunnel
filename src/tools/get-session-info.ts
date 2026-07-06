@@ -1,8 +1,9 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { TunnelServices } from "../types.js";
 import { getSessionInfo } from "../session-store.js";
 
-export function registerGetSessionInfo(server: McpServer): void {
+export function registerGetSessionInfo(server: McpServer, _services?: TunnelServices): void {
   server.tool(
     "get_session_info",
     "获取指定 session 的详细信息，包括标题、工作目录、创建/更新时间、agent 列表和最后一条 prompt。",

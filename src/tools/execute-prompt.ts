@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { TunnelServices } from "../types.js";
+import { generatePollCommand } from "../poll-command.js";
 
 export function registerExecutePrompt(server: McpServer, services: TunnelServices): void {
   const { wireClient } = services;
@@ -56,7 +57,7 @@ export function registerExecutePrompt(server: McpServer, services: TunnelService
         wireClient.setSessionId(session_id);
 
         if (!wait) {
-          // Fire-and-forget: submit prompt, return immediately
+          // Fire-and-forget: submit prompt, return immediately with poll command
           const { promptId } = await wireClient.submitPrompt(prompt, { autoApprove: auto_mode });
           return {
             content: [
@@ -67,7 +68,8 @@ export function registerExecutePrompt(server: McpServer, services: TunnelService
                     submitted: true,
                     session_id,
                     prompt_id: promptId,
-                    hint: "prompt 已提交，session 正在处理。请用 list_io_records 或 read_session_log 跟踪进度。",
+                    hint: "prompt 已提交。将 poll_command 以 Bash(run_in_background=true) 执行，等待回执。",
+                    poll_command: generatePollCommand({ sessionId: session_id }),
                   },
                   null,
                   2
