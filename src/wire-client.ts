@@ -92,6 +92,10 @@ export class WireClient {
   private statusResolvers = new Map<string, Array<{ resolve: (v: string) => void; reject: (e: Error) => void }>>();
   // WS-pushed session state cache — zero-I/O alternative to wire.jsonl parsing
   private sessionStateCache = new Map<string, { status: string; lastTurnId?: number; lastText?: string; updatedAt: number }>();
+  // Optional watch output: write completion status to a file for coordinating session
+  private watchOutputPath: string | null = null;
+  private watchAssistantText = "";
+  private watchPromptCount = 0;
 
   constructor(sessionId?: string) {
     this.baseUrl =
@@ -239,18 +243,8 @@ export class WireClient {
           if (frame.type === "server_hello") {
             clearTimeout(timeout);
             process.stderr.write(`[wire-client] WebSocket connected (${this.wsClientId})\n`);
-
-            // Subscribe to current session if set
-            if (this.sessionId) {
-              this.wsSubscribe(this.sessionId);
-            }
-
+            if (this.sessionId) this.wsSubscribe(this.sessionId);
             resolve();
-            return;
-          }
-
-          if (frame.type === "session_event") {
-            this.handleSessionEvent(frame as unknown as SessionEvent);
             return;
           }
 
@@ -258,6 +252,10 @@ export class WireClient {
             ws.send(JSON.stringify({ type: "pong", id: frame.id }));
             return;
           }
+
+          // Handle direct event frames (not wrapped in session_event)
+          // Kimi Server pushes events as direct frame types matching payload.type
+          this.handleDirectEvent(frame);
         } catch {
           // Ignore unparseable frames
         }
@@ -296,49 +294,78 @@ export class WireClient {
     process.stderr.write(`[wire-client] Subscribed to session ${sessionId} via WebSocket\n`);
   }
 
-  private handleSessionEvent(event: SessionEvent): void {
-    const sessionId = event.session_id;
-    const payload = event.payload;
-    if (!payload || !payload.type) return;
+  private handleDirectEvent(frame: WsFrame): void {
+    const type = frame.type;
+    const payload = frame.payload as Record<string, unknown> | undefined;
+    const sessionId = (payload?.sessionId || payload?.session_id || this.sessionId) as string;
 
-    // Update cache
+    // Update session state cache
     const cached = this.sessionStateCache.get(sessionId) || { status: "unknown", updatedAt: 0 };
-    if (payload.type === "event.session.status_changed" && payload.status) {
+
+    if (type === "event.session.status_changed" && payload?.status) {
       cached.status = payload.status as string;
       cached.updatedAt = Date.now();
-    }
-    if (payload.type === "turn.started") {
-      cached.lastTurnId = payload.turnId;
-      cached.updatedAt = Date.now();
-    }
-    this.sessionStateCache.set(sessionId, cached);
+      this.sessionStateCache.set(sessionId, cached);
 
-    // Auto-approve awaiting approvals
-    if (payload.type === "event.session.status_changed") {
-      const status = payload.status;
-
-      // Notify any waiting sendPrompt calls
+      // Notify waiting sendPrompt calls
       const resolvers = this.statusResolvers.get(sessionId);
       if (resolvers && resolvers.length > 0) {
+        const status = payload.status as string;
         if (status === "idle" || status === "aborted") {
           for (const r of resolvers) r.resolve(status);
           this.statusResolvers.delete(sessionId);
         } else if (status === "awaiting_approval") {
-          // Don't resolve — caller might want to approve and continue waiting
-          // Push the status update so the caller can react
           const resolver = resolvers[0];
           if (resolver) resolver.resolve("awaiting_approval");
         }
       }
     }
 
-    // Log key events
-    if (payload.type === "turn.started") {
+    if (type === "turn.started") {
+      cached.lastTurnId = payload?.turnId as number;
+      cached.updatedAt = Date.now();
+      this.sessionStateCache.set(sessionId, cached);
       process.stderr.write(`[wire-client] Turn started for ${sessionId}\n`);
     }
-    if (payload.type === "turn.ended") {
-      process.stderr.write(`[wire-client] Turn ended for ${sessionId}: ${payload.reason || "unknown"}\n`);
+
+    if (type === "turn.ended") {
+      process.stderr.write(`[wire-client] Turn ended for ${sessionId}: ${payload?.reason || "unknown"}\n`);
     }
+
+    // ── Watch output (for coordinating session) ──────────────────────────────
+    if (this.watchOutputPath) {
+      if (type === "prompt.submitted") {
+        this.watchPromptCount++;
+        this.watchAssistantText = "";
+      }
+      if (type === "assistant.delta") {
+        this.watchAssistantText += (payload?.delta as string) || "";
+      }
+      if (type === "prompt.completed") {
+        try {
+          const { writeFileSync, mkdirSync } = require("node:fs") as typeof import("node:fs");
+          const { dirname } = require("node:path") as typeof import("node:path");
+          mkdirSync(dirname(this.watchOutputPath!), { recursive: true });
+          writeFileSync(this.watchOutputPath!, JSON.stringify({
+            sessionId,
+            status: "completed",
+            result: this.watchAssistantText,
+            promptId: payload?.promptId || "",
+            promptCount: this.watchPromptCount,
+            completedAt: new Date().toISOString(),
+            timestamp: new Date().toISOString(),
+          }, null, 2), "utf-8");
+        } catch {}
+      }
+    }
+  }
+
+  /**
+   * Enable watch output: write completion status to a file after each prompt.completed.
+   * The coordinating session reads this file to know when the task is done.
+   */
+  setWatchOutput(path: string): void {
+    this.watchOutputPath = path;
   }
 
   /**

@@ -106,3 +106,26 @@ export function registerContinueWatch(server: McpServer, services: TunnelService
     }
   );
 }
+
+export function registerSetWatchOutput(server: McpServer, services: TunnelServices): void {
+  server.tool(
+    "set_watch_output",
+    "设置监听结果文件路径。设置后每次 prompt.completed 时自动写入结果到该文件，统筹 session 读取即可获取任务回复。",
+    {
+      path: z.string().describe("状态文件的绝对路径，如 /c/Users/admin/watch-status.json"),
+    },
+    async ({ path }) => {
+      services.wireClient.setWatchOutput(path);
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            set: true,
+            path,
+            hint: "已设置。每次 prompt.completed 时将自动写入结果到此文件。读取此文件即可获取任务回复。",
+          }, null, 2),
+        }],
+      };
+    }
+  );
+}
