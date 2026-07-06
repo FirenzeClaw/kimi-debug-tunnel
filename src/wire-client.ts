@@ -95,6 +95,11 @@ export class WireClient {
   private watchOutputPath: string | null = null;
   private watchAssistantText = "";
   private watchPromptCount = 0;
+  // Health check: periodically ping the server to detect silent crashes
+  private healthCheckTimer: ReturnType<typeof setInterval> | null = null;
+  private healthFailCount = 0;
+  private static HEALTH_CHECK_INTERVAL_MS = 10_000;
+  private static HEALTH_MAX_FAILS = 3;
 
   constructor(sessionId?: string) {
     this.baseUrl =
@@ -176,6 +181,7 @@ export class WireClient {
           capabilities: Record<string, boolean>;
         }>("/api/v1/meta");
         this.connected = true;
+        this.healthFailCount = 0;
         process.stderr.write(
           `[wire-client] Connected to Kimi server v${metaResp.server_version} (session: ${this.sessionId || "none"})\n`
         );
@@ -184,6 +190,9 @@ export class WireClient {
         this.wsConnect().catch((err) => {
           process.stderr.write(`[wire-client] WebSocket unavailable, falling back to polling: ${err.message}\n`);
         });
+
+        // Start periodic health check to detect silent server crashes
+        this.startHealthCheck();
 
         return;
       } catch (err) {
@@ -689,8 +698,62 @@ export class WireClient {
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // Health check — detect silent server crashes and reconnect
+  // ═══════════════════════════════════════════════════════════════════════════════
+
+  private startHealthCheck(): void {
+    this.stopHealthCheck();
+    this.healthCheckTimer = setInterval(async () => {
+      try {
+        await this.transport.apiGet<{ server_version: string }>("/api/v1/meta");
+        // Success — reset fail count. If we were disconnected, this means reconnect happened.
+        if (this.healthFailCount > 0) {
+          process.stderr.write(
+            `[wire-client] Health check recovered (${this.healthFailCount} prior failures)\n`
+          );
+          this.healthFailCount = 0;
+        }
+      } catch {
+        this.healthFailCount++;
+        if (this.healthFailCount === 1) {
+          process.stderr.write(
+            `[wire-client] Health check failed — server may have crashed\n`
+          );
+        }
+        if (this.healthFailCount >= WireClient.HEALTH_MAX_FAILS && this.connected) {
+          process.stderr.write(
+            `[wire-client] Health check failed ${this.healthFailCount} times — marking disconnected, will auto-reconnect\n`
+          );
+          this.connected = false;
+        }
+        // Attempt reconnection when disconnected
+        if (!this.connected) {
+          try {
+            await this.connect();
+          } catch {
+            // connect() already logs errors; keep health check running
+          }
+        }
+      }
+    }, WireClient.HEALTH_CHECK_INTERVAL_MS);
+  }
+
+  private stopHealthCheck(): void {
+    if (this.healthCheckTimer) {
+      clearInterval(this.healthCheckTimer);
+      this.healthCheckTimer = null;
+    }
+    this.healthFailCount = 0;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // Lifecycle
+  // ═══════════════════════════════════════════════════════════════════════════════
+
   async close(): Promise<void> {
     this.connected = false;
+    this.stopHealthCheck();
     if (this.wsReconnectTimer) {
       clearTimeout(this.wsReconnectTimer);
     }

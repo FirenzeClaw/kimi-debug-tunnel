@@ -1,5 +1,6 @@
 <!--
 修改记录:
+  2026-07-06 | kimi-code (robustness) | WireClient 新增心跳探测+自动重连：每10s ping /api/v1/meta，连续3次失败→connected=false→auto connect()；解决 kimi web 静默崩溃后 connected 标志永久过期问题
   2026-07-06 | kimi-code (arch) | 确定后台监听最佳方案：Bash REST 轮询（OS进程信号驱动，零开销），set_watch_output 降为备选；修复 WS 直接帧处理、ESM require 兼容
   2026-07-06 | kimi-code (feature) | 新增 watch_session/get_watch_result/continue_watch/set_watch_output 4工具：WS 后台监听 + 自动化循环 + 文件输出
   2026-07-06 | kimi-code (architecture) | 架构深化 8/8 项：删除 session-manager+flowOrchestrator、message-queue简化为pub/sub、WireClientFactory DI、run_flow统一到WorkflowEngine、WS推送状态缓存、poll_session WS快路径

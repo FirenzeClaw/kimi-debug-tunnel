@@ -1,5 +1,6 @@
 <!--
 修改记录:
+  2026-07-06 | kimi-code (robustness) | WireClient 新增心跳探测+自动重连：每10s ping /api/v1/meta，连续3次无响应→标记断连→自动重连；解决 Kimi web 静默崩溃后状态假活问题
   2026-07-06 | kimi-code (arch) | 后台监听最佳方案确定为 Bash REST 轮询（OS信号驱动），set_watch_output 降为备选；工具总数 18
   2026-07-06 | kimi-code (feature) | watch_session/get_watch_result/continue_watch/set_watch_output 4工具: WS后台监听+自动化循环+文件输出
   2026-07-06 | kimi-code (feature) | 自适应工作流引擎：learn/execute/list/continue_workflow 4工具 + 模板存储 + 监管页面
@@ -22,7 +23,7 @@
 │   kimi-debug-tunnel MCP 服务器 │
 │   ├─ Express HTTP Server      │
 │   ├─ WebSocket Server         │
-│   ├─ WireClient (REST + WS推送)   │
+│   ├─ WireClient (REST + WS推送 + 心跳重连) │
 │   ├─ SessionWatcher (后台监听)     │
 │   └─ MCP stdio transport      │
 └─────────────┬────────────────┘
@@ -141,7 +142,7 @@ src/
 ├── types.ts                 # TunnelServices 依赖注入接口
 ├── mcp-server.ts            # MCP stdio 服务器（注册 18 个工具）
 ├── http-server.ts           # Express + WebSocket 装配入口
-├── wire-client.ts           # Kimi Server REST + WS 推送客户端
+├── wire-client.ts           # Kimi Server REST + WS 推送 + 心跳探测自动重连
 ├── message-queue.ts         # WebSocket pub/sub 广播
 ├── session-store.ts         # 文件系统扫描 + 路径解析
 ├── session-log-reader.ts    # wire.jsonl 日志解析 + IO 提取 + 状态轮询
