@@ -630,11 +630,10 @@ export class WireClient {
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════════
-  // REST helpers
+  // REST helpers (public for watcher use)
   // ═══════════════════════════════════════════════════════════════════════════════
 
-  private async apiGet<T>(path: string): Promise<T> {
+  async apiGet<T>(path: string): Promise<T> {
     const url = `${this.baseUrl}${path}`;
     const headers: Record<string, string> = {
       Accept: "application/json",
