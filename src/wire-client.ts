@@ -9,6 +9,8 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { writeFileSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import { WebSocket } from "ws";
 
 interface KimiContentBlock {
@@ -347,8 +349,6 @@ export class WireClient {
       }
       if (type === "prompt.completed") {
         try {
-          const { writeFileSync, mkdirSync } = require("node:fs") as typeof import("node:fs");
-          const { dirname } = require("node:path") as typeof import("node:path");
           mkdirSync(dirname(this.watchOutputPath!), { recursive: true });
           writeFileSync(this.watchOutputPath!, JSON.stringify({
             sessionId,
@@ -397,8 +397,6 @@ export class WireClient {
           }
           if (text || status === "idle" || status === "aborted") {
             try {
-              const { writeFileSync, mkdirSync } = require("node:fs") as typeof import("node:fs");
-              const { dirname } = require("node:path") as typeof import("node:path");
               mkdirSync(dirname(this.watchOutputPath!), { recursive: true });
               writeFileSync(this.watchOutputPath!, JSON.stringify({
                 sessionId: this.sessionId,
