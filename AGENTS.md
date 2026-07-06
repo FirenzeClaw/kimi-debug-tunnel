@@ -1,6 +1,8 @@
 <!--
 修改记录:
-  2026-07-06 | kimi-code (architecture) | 架构深化 5/8 项：删除 session-manager 透传桶、message-queue 队列→pub/sub、WireClientFactory DI、消除 flowOrchestrator 单例、run_flow 统一到 WorkflowEngine、WS 推送状态缓存
+  2026-07-06 | kimi-code (feature) | 新增 watch_session/get_watch_result/continue_watch 3工具：SessionWatcher WS后台监听 + 自动化循环
+  2026-07-06 | kimi-code (bugfix) | 修复 /auto 文本注入触发LLM自主处理 → 改用 REST API permission_mode；execute_prompt wait=false 未传 autoApprove
+  2026-07-06 | kimi-code (architecture) | 架构深化 8/8 项：删除 session-manager+flowOrchestrator、message-queue简化为pub/sub、WireClientFactory DI、run_flow统一到WorkflowEngine、WS推送状态缓存、poll_session WS快路径
   2026-07-06 | kimi-code (bugfix) | selftest 修复：WireClient.connect 缺失、activeExecutions 泄漏、model/thinking 参数被忽略、escapeYaml 转义不完整
   2026-07-06 | kimi-code (feature) | 新增自适应工作流引擎：learn_workflow/execute_workflow/list_templates/continue_workflow 4个工具 + 模板存储 + Web 监管页面
   2026-07-06 | kimi-code (bugfix) | 修复 run_flow /auto 注入：不设 session 级 permission_mode，改用 REST API autoApprove；submitPrompt 新增 autoApprove 重试机制
@@ -34,7 +36,7 @@
 src/
 ├── index.ts                 # 入口：创建 TunnelServices，启动 HTTP+MCP 双服务器
 ├── types.ts                 # TunnelServices 接口（wireClient, messageQueue, startTime, workflowEngine）
-├── mcp-server.ts            # MCP stdio 服务器，注册全部 16 个工具
+├── mcp-server.ts            # MCP stdio 服务器，注册全部 17 个工具
 ├── http-server.ts           # Express + WebSocket 装配入口（薄层）
 ├── wire-client.ts           # Kimi Server REST + WS 推送客户端（状态缓存）
 ├── message-queue.ts         # WebSocket 客户端注册 + pub/sub 广播（简化为 67 行）
@@ -42,6 +44,7 @@ src/
 ├── workflow-template.ts     # 工作流模板类型定义 + YAML解析 + 校验
 ├── workflow-store.ts        # 模板持久化（CRUD：list/load/save/delete）
 ├── workflow-engine.ts       # 自适应工作流引擎：创建session→逐步驱动→阻塞处理→恢复
+├── session-watcher.ts        # WS 事件驱动后台监听：每3s检查状态，完成时自动拉取回复
 ├── tools/
 │   ├── execute-prompt.ts    # 发送 prompt 并等待完整回复
 │   ├── create-session.ts    # 通过 REST API 创建新 session
@@ -51,12 +54,13 @@ src/
 │   ├── get-session-info.ts  # 查看 session 详情
 │   ├── read-session-log.ts  # 读取对话日志
 │   ├── list-io-records.ts   # 快速查看输入输出记录（仅 prompt+回复）
-│   ├── poll-session.ts      # 结构化轮询 session 运行状态
+│   ├── poll-session.ts      # 结构化轮询 session 运行状态（WS 缓存优先）
 │   ├── run-flow.ts           # 分步流程执行引擎
 │   ├── learn-workflow.ts    # 从描述或历史session学习工作流模板
 │   ├── execute-workflow.ts  # 执行工作流模板：创建session→逐步驱动→自适应调整
 │   ├── list-workflow-templates.ts # 列出可用模板
 │   ├── continue-workflow.ts # 对暂停的工作流执行决策（重试/跳过/终止/覆盖）
+│   ├── session-watch.ts     # watch_session/get_watch_result/continue_watch 后台监听
 │   └── get-tunnel-status.ts # Wire 连接状态、客户端数、运行时间
 └── public/
     ├── console.html          # Web 调试控制台
@@ -105,8 +109,8 @@ npm run inspector    # MCP Inspector 调试模式
 入口层:    index.ts（创建服务容器、装配、启动）
 传输层:    http-server.ts, mcp-server.ts
 工具层:    tools/*（MCP 工具注册）
-业务层:    wire-client.ts, session-orchestrator.ts, session-manager.ts, workflow-engine.ts
-数据层:    message-queue.ts, workflow-template.ts, workflow-store.ts
+业务层:    wire-client.ts, session-orchestrator.ts, workflow-engine.ts, session-watcher.ts
+数据层:    message-queue.ts, workflow-template.ts, workflow-store.ts, session-log-reader.ts
 类型层:    types.ts
 ```
 <!-- AUTO:END -->
@@ -128,8 +132,20 @@ npm run inspector    # MCP Inspector 调试模式
 
 ④ ... 统筹 session 可做其他工作 ...
 
-⑤ get_watch_result(watch_id)         ← 拿到最终回复，无需轮询
-   → { ready: true, result: "..." }
+⑤ continue_watch(watch_id, next_instruction)  ← 拿到回复 + 自动发下一步
+   → { ready: true, result: "...", next_watch_id: "w2" }
+
+⑥ 循环 ⑤：分析 result → 决定下一步 → continue_watch(w2, next)
+
+### 自动化循环示例
+
+```
+w = watch_session(session_id)
+循环:
+  r = continue_watch(w, "下一步指令")
+  if r.ready → 分析 r.result, 决定下一步, w = r.next_watch_id
+  else → 等几秒再调
+```
 ```
 
 ### 备选：手动轮询（兼容旧流程）

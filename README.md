@@ -1,7 +1,8 @@
 <!--
 修改记录:
-  2026-07-06 | kimi-code (bugfix) | selftest 修复：WireClient.connect 缺失、activeExecutions 泄漏、model/thinking/escapeYaml
-  2026-07-06 | kimi-code (feature) | 自适应工作流引擎：learn_workflow/execute_workflow/list_templates/continue_workflow 4工具 + 模板存储 + 监管页面
+  2026-07-06 | kimi-code (feature) | watch_session/get_watch_result/continue_watch 3工具: WS后台监听+自动化循环
+  2026-07-06 | kimi-code (bugfix) | /auto注入移除、execute_prompt auto_mode 修复、WS推送集成、架构深化8项
+  2026-07-06 | kimi-code (feature) | 自适应工作流引擎：learn/execute/list/continue_workflow 4工具 + 模板存储 + 监管页面
   2026-07-06 | kimi-code (architecture) | 架构深化：消除 9 文件 584 行死代码，拆分 session-manager 为 store+reader，消除 3 个单例为 DI
   2026-07-06 | kimi-code (tools) | 新增 3 个 MCP 工具（list_io_records/create_session/poll_session），总计 10 工具；execute_prompt/chat_with_session 新增 auto_mode + wait 参数
   2026-07-06 | kimi-code (bugfix) | 修复 EADDRINUSE 多 session 冲突：http-server.ts 添加双重错误处理避免 MCP 崩溃
@@ -21,7 +22,8 @@
 │   kimi-debug-tunnel MCP 服务器 │
 │   ├─ Express HTTP Server      │
 │   ├─ WebSocket Server         │
-│   ├─ WireClient (REST)        │
+│   ├─ WireClient (REST + WS推送)   │
+│   ├─ SessionWatcher (后台监听)     │
 │   └─ MCP stdio transport      │
 └─────────────┬────────────────┘
               ↕ Bearer Token REST API
@@ -101,6 +103,9 @@ Tunnel 启动后自动连接 Kimi Server 并选择最近的 session。
 | `list_templates` | 列出所有可用的工作流模板 |
 | `execute_workflow` | 执行工作流模板：创建任务 session，逐步下发指令，自适应调整 |
 | `continue_workflow` | 对暂停的工作流执行决策（重试/跳过/终止/手动覆盖） |
+| `watch_session` | 启动 WS 后台监听，主动等待任务 session 完成 |
+| `get_watch_result` | 获取后台监听结果（非阻塞） |
+| `continue_watch` | 拿结果+自动发下一步指令+启动新监听，形成自动化循环 |
 
 ## REST API
 
@@ -133,17 +138,17 @@ curl -X POST http://localhost:3456/api/execute \
 src/
 ├── index.ts                 # 入口：创建 TunnelServices，启动 HTTP+MCP
 ├── types.ts                 # TunnelServices 依赖注入接口
-├── mcp-server.ts            # MCP stdio 服务器（注册 14 个工具）
+├── mcp-server.ts            # MCP stdio 服务器（注册 17 个工具）
 ├── http-server.ts           # Express + WebSocket 装配入口
-├── wire-client.ts           # Kimi Server REST API 客户端
-├── message-queue.ts         # WebSocket 客户端管理 + 响应广播
-├── session-manager.ts       # Session 管理薄委托层
+├── wire-client.ts           # Kimi Server REST + WS 推送客户端
+├── message-queue.ts         # WebSocket pub/sub 广播
 ├── session-store.ts         # 文件系统扫描 + 路径解析
 ├── session-log-reader.ts    # wire.jsonl 日志解析 + IO 提取 + 状态轮询
 ├── session-orchestrator.ts  # 多轮任务编排引擎
 ├── workflow-template.ts     # 模板类型定义 + YAML 解析 + Zod 校验
 ├── workflow-store.ts        # 模板持久化（CRUD）
 ├── workflow-engine.ts       # 自适应工作流引擎
+├── session-watcher.ts        # WS 后台监听器
 ├── tools/
 │   ├── execute-prompt.ts    # 发送 prompt 并等待完整回复
 │   ├── chat-with-session.ts # 全自动多轮编排
@@ -159,6 +164,7 @@ src/
 │   ├── execute-workflow.ts  # 执行工作流模板
 │   ├── list-workflow-templates.ts # 列出可用模板
 │   ├── continue-workflow.ts # 暂停工作流的决策处理
+│   ├── session-watch.ts     # 后台监听工具 (watch/get/continue)
 │   └── get-tunnel-status.ts # Wire 连接状态、客户端数、运行时间
 └── public/
     ├── console.html          # Web 调试控制台
