@@ -1,7 +1,10 @@
 <!--
 修改记录:
-  2026-07-07 | kimi-code (docs) | coordinator-guide.md 新增越权与冲动控制（§1.5.6）：越权/冲动的定义、纠正协议、为什么是注意力漂移的早期信号；衰减信号表新增越权+冲动两行；PM红线扩充至14条
-  2026-07-07 | kimi-code (docs) | coordinator-guide.md 升级为项目经理视角：新增 §零 角色定位、工作分解规范、PM决策框架、质量门、PM级别红线；v2.2
+  2026-07-07 | kimi-code (docs) | coordinator-guide.md 退役流程增加 learn 步骤 + PM 自身技能表补充 learn；核心原则框第三条：可复用方案=组织资产；PM红线扩充至15条
+  2026-07-07 | kimi-code (docs) | coordinator-guide.md 新增越权与冲动控制（§1.5.6）——注意力漂移早期信号；衰减信号表+2行；PM红线14条
+  2026-07-07 | kimi-code (docs) | coordinator-guide.md 注意力管理融入本机实测：360K上下文拐点、衰减信号典型触发点、退役速查量化阈值、上下文估算代理指标
+  2026-07-07 | kimi-code (docs) | coordinator-guide.md 新增 §1.5 上下文效率与注意力管理：Token经济编排、审查-修复分离、衰减检测、退役流程、规范偏离纠正
+  2026-07-07 | kimi-code (docs) | coordinator-guide.md 升级为项目经理视角：新增 §零 角色定位、工作分解规范、PM决策框架、质量门；v2.2
   2026-07-07 | kimi-code (docs) | 新增 docs/coordinator-guide.md：统筹 Session 准入规范——工具准入矩阵、运行规范、错误处理、红线、内容安全
   2026-07-07 | kimi-code (fix) | sanitizeText 反斜杠预加固：\\xNN/\\uNNNN 序列双反斜杠硬化 + 负向前瞻幂等保证，防御下游 kimi-code JSON 序列化器漏转义导致的 Provider hex escape parse 错误
   2026-07-07 | kimi-code (fix) | session-log-reader 防御性增强：新增 sanitizeText() 清洗 lone surrogates + 控制字符；listIORecords/readSessionLog 增加 maxContentLength 参数（默认 2000/500）；list_io_records/read_session_log 工具暴露 max_content_length 参数；移除工具层二次截断
