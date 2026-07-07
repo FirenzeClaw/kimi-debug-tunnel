@@ -1,5 +1,6 @@
 <!--
 修改记录:
+  2026-07-07 | kimi-code (docs) | 新增 docs/coordinator-guide.md：统筹 Session 准入规范——工具准入矩阵、运行规范、错误处理、红线、内容安全
   2026-07-07 | kimi-code (fix) | sanitizeText 反斜杠预加固：\\xNN/\\uNNNN 序列双反斜杠硬化 + 负向前瞻幂等保证，防御下游 kimi-code JSON 序列化器漏转义导致的 Provider hex escape parse 错误
   2026-07-07 | kimi-code (fix) | session-log-reader 防御性增强：新增 sanitizeText() 清洗 lone surrogates + 控制字符；listIORecords/readSessionLog 增加 maxContentLength 参数（默认 2000/500）；list_io_records/read_session_log 工具暴露 max_content_length 参数；移除工具层二次截断
   2026-07-06 | kimi-code (robustness) | WireClient 新增心跳探测+自动重连：每10s ping /api/v1/meta，连续3次失败→connected=false→auto connect()；解决 kimi web 静默崩溃后 connected 标志永久过期问题
@@ -203,6 +204,14 @@ for m in data.get('items',[]):
 | `done` | turn 完成 (end_turn) | 工作流结束 |
 | `error` | 检测到错误 | 查看 log |
 | `idle` | 空闲等待中 | 可能卡住 |
+
+## 参考文档
+
+| 文档 | 用途 |
+|------|------|
+| `API.md` | Kimi Server REST API 完整参考（51 端点） |
+| `docs/coordinator-guide.md` | **统筹 Session 准入规范**——工具准入矩阵、运行规范、错误处理、红线 |
+| `specs/001-adaptive-workflow-engine/` | 自适应工作流引擎的完整规格、计划、数据模型 |
 
 ## Agent Skills
 
