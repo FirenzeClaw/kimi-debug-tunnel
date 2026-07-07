@@ -1,5 +1,7 @@
 <!--
 修改记录:
+  2026-07-07 | kimi-code (v2.3) | PM Dashboard 重写 + 监控页面升级；coordinator-guide v2.3（PM范式/Skill调度/注意力管理/越权控制）；2个新spec（002/003）；竞品分析+系统调研
+  2026-07-07 | kimi-code (fix) | sanitizeText 反斜杠预加固 + maxContentLength 参数：防御 hex escape 错误，解决审计报告截断
   2026-07-06 | kimi-code (robustness) | WireClient 新增心跳探测+自动重连：每10s ping /api/v1/meta，连续3次无响应→标记断连→自动重连；解决 Kimi web 静默崩溃后状态假活问题
   2026-07-06 | kimi-code (arch) | 后台监听最佳方案确定为 Bash REST 轮询（OS信号驱动），set_watch_output 降为备选；工具总数 18
   2026-07-06 | kimi-code (feature) | watch_session/get_watch_result/continue_watch/set_watch_output 4工具: WS后台监听+自动化循环+文件输出
@@ -113,8 +115,8 @@ Tunnel 启动后自动连接 Kimi Server 并选择最近的 session。
 
 | 端点 | 方法 | 描述 |
 |------|------|------|
-| `/` | GET | Web 调试控制台 |
-| `/workflow-console.html` | GET | 工作流实时监管页面 |
+| `/` | GET | Web 调试控制台 (v2.3) |
+| `/workflow-console.html` | GET | PM Dashboard — Session 健康监控、注意力预警、Skill 调度日志 |
 | `/api/status` | GET | 隧道状态 |
 | `/api/execute` | POST | 发送 prompt 并等待回复 |
 | `/api/send` | POST | 发送 prompt 并等待回复（与 /api/execute 相同机制） |
@@ -169,9 +171,19 @@ src/
 │   ├── session-watch.ts     # 后台监听工具 (watch/get/continue/set_watch)
 │   └── get-tunnel-status.ts # Wire 连接状态、客户端数、运行时间（含 wsConnected）
 └── public/
-    ├── console.html          # Web 调试控制台
-    └── workflow-console.html # 工作流实时监管页面
+    ├── console.html          # Web 调试控制台 (v2.3)
+    └── workflow-console.html # PM Dashboard 监管面板
 ```
+
+## 参考文档
+
+| 文档 | 用途 |
+|------|------|
+| `API.md` | Kimi Server REST API 完整参考 |
+| `docs/coordinator-guide.md` | 统筹 Session 准入规范（PM视角 v2.3） |
+| `specs/001-adaptive-workflow-engine/` | 自适应工作流引擎 [DONE] |
+| `specs/002-session-memory-share/` | Session 冷启动记忆共享 [WIP] |
+| `specs/003-permission-policy/` | 权限与策略管理 [WIP] |
 
 ## License
 

@@ -1,5 +1,11 @@
 <!--
 修改记录:
+  2026-07-07 | kimi-code (spec) | 新增 specs/003-permission-policy：三层权限架构（Session级+任务级策略+工具级拦截）——对标 Codex/AGT
+  2026-07-07 | kimi-code (spec) | 新增 specs/002-session-memory-share：三层共享内存（L1项目知识库+L2 Session上下文+L3学习沉淀）——冷启动上下文节省83%+
+  2026-07-07 | kimi-code (research) | 竞品分析：kimi-mcp-server/agent-orchestration/agent-pool-mcp；内存共享系统调研；权限管理系统调研
+  2026-07-07 | kimi-code (feat) | PM Dashboard 重写（workflow-console.html→四区监管面板）；console.html v2→v2.3 设计升级
+  2026-07-07 | kimi-code (docs) | coordinator-guide.md 退役流程增加 learn 步骤 + PM 自身技能表补充 learn；核心原则框第三条：可复用方案=组织资产
+  2026-07-07 | kimi-code (docs) | coordinator-guide.md 新增 §三 Skill 调度指南——39个skill按PM场景分类；PM自身技能与任务技能明确分离
   2026-07-07 | kimi-code (docs) | coordinator-guide.md 退役交接：步骤⑤⑥升级为7区块上下文交接模板（含强制基线阅读+等待确认协议）；PM红线+反模式表追加上下文交接条目
   2026-07-07 | kimi-code (docs) | coordinator-guide.md 新增越权与冲动控制（§1.5.6）——注意力漂移早期信号；衰减信号表+2行；PM红线14条
   2026-07-07 | kimi-code (docs) | coordinator-guide.md 注意力管理融入本机实测：360K上下文拐点、衰减信号典型触发点、退役速查量化阈值、上下文估算代理指标
@@ -215,8 +221,10 @@ for m in data.get('items',[]):
 | 文档 | 用途 |
 |------|------|
 | `API.md` | Kimi Server REST API 完整参考（51 端点） |
-| `docs/coordinator-guide.md` | **统筹 Session 准入规范（项目经理视角）**——角色定位、工作分解、PM决策框架、质量门、红线 |
-| `specs/001-adaptive-workflow-engine/` | 自适应工作流引擎的完整规格、计划、数据模型 |
+| `docs/coordinator-guide.md` | **统筹 Session 准入规范（PM视角 v2.3）**——角色定位、工作分解、注意力管理、Skill调度、越权控制、红线 |
+| `specs/001-adaptive-workflow-engine/` | 自适应工作流引擎——已实施 |
+| `specs/002-session-memory-share/` | [WIP] Session 冷启动记忆共享——三层内存架构 |
+| `specs/003-permission-policy/` | [WIP] 权限与策略管理——read-only/safe-edit/full-access |
 
 ## Agent Skills
 
