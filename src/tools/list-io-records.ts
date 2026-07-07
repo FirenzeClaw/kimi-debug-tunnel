@@ -17,9 +17,15 @@ export function registerListIORecords(server: McpServer, _services?: TunnelServi
         .max(100)
         .default(20)
         .describe("返回记录数量上限"),
+      max_content_length: z
+        .number()
+        .min(50)
+        .max(50000)
+        .default(2000)
+        .describe("每条记录内容的最大字符数"),
     },
-    async ({ session_id, limit }) => {
-      const result = await listIORecords(session_id, { limit });
+    async ({ session_id, limit, max_content_length }) => {
+      const result = await listIORecords(session_id, { limit, maxContentLength: max_content_length });
 
       if (!result) {
         return {
@@ -46,10 +52,7 @@ export function registerListIORecords(server: McpServer, _services?: TunnelServi
         const stepInfo = rec.type === "assistant" && rec.stepCount
           ? ` [${rec.stepCount} steps]`
           : "";
-        const content = rec.content.length > 300
-          ? rec.content.slice(0, 300) + "..."
-          : rec.content;
-        lines.push(`${prefix} Turn ${rec.turn}${stepInfo}: ${content}`);
+        lines.push(`${prefix} Turn ${rec.turn}${stepInfo}: ${rec.content}`);
         lines.push("");
       }
 

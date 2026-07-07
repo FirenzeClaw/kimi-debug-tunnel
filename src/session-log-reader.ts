@@ -20,6 +20,19 @@ export function truncateText(text: string, maxLen: number): string {
   return text.slice(0, maxLen) + "...";
 }
 
+/**
+ * Sanitize text to prevent downstream JSON serialization issues.
+ * - Replaces lone surrogates (U+D800-U+DFFF) with U+FFFD
+ * - Replaces control characters (U+0000-U+001F except \t \n \r) with spaces
+ * - Collapses multiple consecutive spaces from control char replacement
+ */
+export function sanitizeText(text: string): string {
+  return text
+    .replace(/[\uD800-\uDFFF]/g, "\uFFFD")
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, " ")
+    .replace(/ {2,}/g, " ");
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 export interface LogEntry {
@@ -70,9 +83,9 @@ export interface SessionStatus {
 
 export async function readSessionLog(
   sessionId: string,
-  options: { afterLine?: number; limit?: number; includeThinking?: boolean } = {}
+  options: { afterLine?: number; limit?: number; includeThinking?: boolean; maxContentLength?: number } = {}
 ): Promise<SessionLog | null> {
-  const { afterLine = 0, limit = 50, includeThinking = false } = options;
+  const { afterLine = 0, limit = 50, includeThinking = false, maxContentLength = 500 } = options;
 
   const sessionPath = await findSessionPath(sessionId);
   if (!sessionPath) return null;
@@ -152,18 +165,18 @@ export async function readSessionLog(
           let entryType = entry.type;
 
           if (entry.type === "turn.prompt") {
-            content = truncateText(extractPromptText(entry), 500);
+            content = truncateText(sanitizeText(extractPromptText(entry)), maxContentLength);
             entryType = "user_prompt";
           } else if (
             entry.type === "context.append_loop_event" &&
             entry.event?.type === "content.part"
           ) {
             if (entry.event.part.type === "text") {
-              content = truncateText(entry.event.part.text, 300);
+              content = truncateText(sanitizeText(entry.event.part.text), maxContentLength);
               entryType = "assistant_text";
             } else if (entry.event.part.type === "think") {
               if (!includeThinking) continue;
-              content = truncateText(entry.event.part.think, 200);
+              content = truncateText(sanitizeText(entry.event.part.think), maxContentLength);
               entryType = "thinking";
             } else {
               continue;
@@ -173,7 +186,7 @@ export async function readSessionLog(
             entry.event?.type === "tool.call"
           ) {
             content = truncateText(
-              `${entry.event.name}(${JSON.stringify(entry.event.args || {})})`,
+              sanitizeText(`${entry.event.name}(${JSON.stringify(entry.event.args || {})})`),
               200
             );
             entryType = "tool_call";
@@ -224,9 +237,9 @@ export async function readSessionLog(
 
 export async function listIORecords(
   sessionId: string,
-  options: { limit?: number } = {}
+  options: { limit?: number; maxContentLength?: number } = {}
 ): Promise<IORecordsResult | null> {
-  const { limit = 40 } = options;
+  const { limit = 40, maxContentLength = 2000 } = options;
 
   const sessionPath = await findSessionPath(sessionId);
   if (!sessionPath) return null;
@@ -251,7 +264,7 @@ export async function listIORecords(
             records.push({
               turn: turnIndex,
               type: "assistant",
-              content: lastAssistantText,
+              content: truncateText(sanitizeText(lastAssistantText), maxContentLength),
               time: 0,
               stepCount,
             });
@@ -261,11 +274,11 @@ export async function listIORecords(
           turnIndex++;
           stepCount = 0;
 
-          const prompt = extractPromptText(entry);
+          const prompt = sanitizeText(extractPromptText(entry));
           records.push({
             turn: turnIndex,
             type: "user",
-            content: prompt,
+            content: truncateText(prompt, maxContentLength),
             time: entry.time,
           });
         }
@@ -287,7 +300,7 @@ export async function listIORecords(
       records.push({
         turn: turnIndex,
         type: "assistant",
-        content: lastAssistantText,
+        content: truncateText(sanitizeText(lastAssistantText), maxContentLength),
         time: 0,
         stepCount,
       });

@@ -28,12 +28,19 @@ export function registerReadSessionLog(server: McpServer, _services?: TunnelServ
         .boolean()
         .default(false)
         .describe("是否包含思考过程条目"),
+      max_content_length: z
+        .number()
+        .min(50)
+        .max(50000)
+        .default(500)
+        .describe("每条日志内容的最大字符数"),
     },
-    async ({ session_id, after_line, limit, include_thinking }) => {
+    async ({ session_id, after_line, limit, include_thinking, max_content_length }) => {
       const log = await readSessionLog(session_id, {
         afterLine: after_line,
         limit,
         includeThinking: include_thinking,
+        maxContentLength: max_content_length,
       });
 
       if (!log) {
@@ -55,10 +62,10 @@ export function registerReadSessionLog(server: McpServer, _services?: TunnelServ
         lastTurnComplete: log.lastTurnComplete,
         lastTurnFinishReason: log.lastTurnFinishReason,
         lastUserPrompt: log.lastTurnPrompt
-          ? log.lastTurnPrompt.content.slice(0, 200)
+          ? log.lastTurnPrompt.content
           : null,
         lastAssistantResponse: log.lastAssistantText
-          ? log.lastAssistantText.content.slice(0, 500)
+          ? log.lastAssistantText.content
           : null,
         recentToolCalls: log.lastToolCalls,
         recentEntries: log.recentEntries,
