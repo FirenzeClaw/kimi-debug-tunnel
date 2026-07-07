@@ -22,12 +22,23 @@ export function truncateText(text: string, maxLen: number): string {
 
 /**
  * Sanitize text to prevent downstream JSON serialization issues.
+ * - Double-escapes \\xNN and \\uNNNN sequences (backslash hardening)
+ *   to survive a potentially buggy downstream JSON serializer that may
+ *   fail to re-escape backslashes before embedding content in a JSON string.
  * - Replaces lone surrogates (U+D800-U+DFFF) with U+FFFD
- * - Replaces control characters (U+0000-U+001F except \t \n \r) with spaces
+ * - Replaces control characters (U+0000-U+001F except \\t \\n \\r) with spaces
  * - Collapses multiple consecutive spaces from control char replacement
  */
 export function sanitizeText(text: string): string {
   return text
+    // Backslash hardening: \xNN → \\xNN, \uNNNN → \\uNNNN
+    // Negative lookbehind ensures idempotency: already-hardened \\xNN is not re-hardened.
+    // This ensures the content survives at least one missed escape roundtrip:
+    // even if a downstream serializer only escapes the first backslash,
+    // the second backslash keeps the sequence valid in JSON.
+    .replace(/(?<!\\)\\x([0-9a-fA-F]{2})/g, "\\\\x$1")
+    .replace(/(?<!\\)\\u([0-9a-fA-F]{4})/g, "\\\\u$1")
+    // Character-level sanitization
     .replace(/[\uD800-\uDFFF]/g, "\uFFFD")
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, " ")
     .replace(/ {2,}/g, " ");
