@@ -346,7 +346,123 @@ AI session 的注意力会随上下文增长而衰减。PM 必须识别以下信
 
 ---
 
-## 三、执行规范
+## 三、Skill 调度指南
+
+> **Skills 是 PM 的工具箱。** 每个 task session 在收到 prompt 时自动加载匹配的 skill。
+> PM 的职责是：知道什么场景该让 session 用什么 skill，并在 prompt 中明确指示。
+
+### 3.1 调度原则
+
+| 原则 | 说明 |
+|------|------|
+| **在 prompt 中指明** | "使用 `code-review` skill 审查以下变更" — 不要让 session 自己猜 |
+| **一个任务一个主 skill** | 避免在一个 prompt 中要求 session 同时用 3+ 个 skill → 注意力分散 |
+| **skill 不是替代 prompt** | 仍然要写清楚任务、产出、边界——skill 提供的是方法论框架，不是任务内容 |
+
+### 3.2 代码质量类
+
+| Skill | 用途 | PM 调度时机 |
+|-------|------|------------|
+| `code-review` | 五轴审查（正确性/可读性/架构/安全/性能），中文三级标注 | 任务 session 完成代码修改后；跨 session 审查产出时；PR 合并前 |
+| `code-simplification` | 代码简化——去冗余、扁平化抽象、不变行为 | session 产出的代码过于复杂时；重构前需要对现有代码减肥 |
+| `selftest` | 四维自审查——逻辑漏洞、遗漏边界、偏离项目标准 | **每次任务 session 完成变更后必调**——这是交付前的最后一道防线 |
+
+### 3.3 调试与测试类
+
+| Skill | 用途 | PM 调度时机 |
+|-------|------|------------|
+| `systematic-debugging` | 系统化调试——先理解再修复，禁止猜测式 patch | 任务 session 报告 bug 或测试失败时；任何非显而易见的错误 |
+| `test-driven-development` | TDD——先写测试再写实现 | 新增功能或修复 bug 时；session 产出缺少测试覆盖时 |
+| `cpp-testing` | C++ 测试（GoogleTest/CTest/覆盖率） | 任务涉及 C++ 代码测试时 |
+| `python-testing` | Python 测试（pytest/fixtures/mock） | 任务涉及 Python 代码测试时 |
+| `browser-testing-with-devtools` | Chrome DevTools MCP 真实浏览器测试 | 需要检查 DOM/控制台/网络/性能时 |
+
+### 3.4 规范与设计类
+
+| Skill | 用途 | PM 调度时机 |
+|-------|------|------------|
+| `api-design` | REST/GraphQL API、模块接口、TypeScript 类型契约设计 | 新增 API 端点或修改接口签名时 |
+| `codebase-design` | 深模块设计——小接口大实现，接缝确定 | 新增模块或重构接口边界时 |
+| `domain-modeling` | 领域建模——术语统一、CONTEXT.md 维护 | 项目初期或领域术语出现混淆时 |
+| `coding-standards` | 通用编码标准——KISS/DRY/YAGNI/SOLID + TS/React/Node 专项 | 新 session 首条 prompt 中注明以建立规范基线 |
+| `requirements-definition` | 三阶段需求管线——访谈→提炼→PRD | 用户需求模糊、需要从零定义功能时 |
+| `brainstorming` | 实现前探索用户意图和设计方案 | 新功能或重大修改前，避免方向错误 |
+
+### 3.5 Speckit 管线（规格驱动开发）
+
+> 当任务涉及完整功能开发时，PM 应按管线顺序逐阶段调度。
+
+| 阶段 | Skill | 产出 | 调度时机 |
+|------|-------|------|---------|
+| 1. 规格 | `speckit-specify` | `spec.md` | 功能需求明确后 |
+| 2. 澄清 | `speckit-clarify` | 澄清后的 spec | spec 中有歧义点 |
+| 3. 计划 | `speckit-plan` | `plan.md` | spec 完成后 |
+| 4. 任务 | `speckit-tasks` | `tasks.md` | plan 完成后 |
+| 5. 检查 | `speckit-checklist` | 验收清单 | plan 完成后（与 tasks 并行） |
+| 6. 实施 | `speckit-implement` | 代码变更 | tasks 就绪后 |
+| 7. 分析 | `speckit-analyze` | 跨制品一致性报告 | tasks 生成后 |
+| — | `speckit-constitution` | 项目宪法 | 项目初始化或原则变更时 |
+
+**PM 调度模式**：每个 Speckit 阶段可以用一个独立的 task session 执行（session 职责单一），产出写文件后 PM 审查，合格后进入下一阶段。
+
+### 3.6 文档类
+
+| Skill | 用途 | PM 调度时机 |
+|-------|------|------------|
+| `md-update` | 对话→文档同步——将 session 产出持久化到项目文档 | **Session 退役前必调**（§1.5.4）；每次完成阶段性工作后 |
+| `documentation-and-adrs` | 架构决策记录、API 文档、README、CHANGELOG | 重大架构决策后；新人需要理解项目时 |
+| `project-docs` | 从代码库分析生成项目文档 | 项目接手或文档缺失/过时时 |
+
+### 3.7 安全与性能类
+
+| Skill | 用途 | PM 调度时机 |
+|-------|------|------------|
+| `security-and-hardening` | OWASP 防护、输入验证、鉴权、密钥管理、SSRF | 涉及用户输入、认证、数据存储的代码变更后 |
+| `performance-optimization` | 先测量再优化——只修测量证明有问题的部分 | 性能需求明确或收到慢行为报告时 |
+| `observability-and-instrumentation` | 结构化日志、RED 指标、分布式追踪 | 新增服务/端点/后台任务时 |
+
+### 3.8 实施方法论
+
+| Skill | 用途 | PM 调度时机 |
+|-------|------|------------|
+| `incremental-implementation` | 薄垂直切片交付——每片 ≤100 行未测代码 | 多文件变更、新功能开发 |
+| `deprecation-and-migration` | Strangler Fig、适配器、特性开关——安全下线旧系统 | 替换旧系统或合并重复功能时 |
+| `database-migrations` | 模式变更、数据迁移、回滚、零停机部署 | 数据库 schema 变更时 |
+| `frontend-ui-engineering` | UI 组件——无障碍、性能、设计系统 | 创建/修改 UI 组件时 |
+| `ui-ux-pro-max` | 50+ 风格、161 色彩方案、57 字体配对——完整 UI/UX 设计系统 | 需要从零设计界面或选择视觉方案时 |
+
+### 3.9 PM 自身技能（不在任务 session 中调度）
+
+> 以下 skill 是 PM（统筹 Session）自己的工具，用于编排决策和上下文管理——**不要**把它们写入任务 session 的 prompt。
+
+| Skill | 用途 | PM 使用时机 |
+|-------|------|------------|
+| `kimi-debug-tunnel` | MCP 工具使用规范——即发即返、后台轮询、红线 | 当前 session 中存在 kimi-debug-tunnel MCP 工具时自动加载 |
+| `agent-session-monitor` | 通过 wire.jsonl 尾部推断 session 状态（无需 API） | 无法通过 poll_session 获取状态时；session 疑似卡死时 |
+| `dispatching-parallel-agents` | 并行子代理编排——独立任务的并行分派 | 2 个以上独立任务同时需要分派时 |
+| `subagent-driven-development` | 在当前 session 中执行包含独立任务的实现计划 | 有 tasks.md 且多个任务可独立执行时 |
+| `multiagents` | 多子代理并行实施——确保无文件冲突、流式调度 | 多文件变更需要并行实施时 |
+| `context-engineering` | 上下文工程——按需加载、历史压缩、防溢出 | 长会话或上下文窗口快满时 |
+| `plan-with-flash` | 双模型协作——轻量探索生成计划，确认后再执行 | 复杂多步骤任务需要先规划时 |
+| `doubt-driven-development` | 质疑驱动——对抗性审查，倾向证伪 | 高风险代码或非平凡决策时 |
+| `confidence-check` | 文档逐条置信度评级——禁止快速浏览式审查 | 验证 spec/plan/PRD 准确性时 |
+| `using-agent-skills` | 技能编排——管理完整开发周期流程 | 开始新会话或需要发现适用技能时 |
+
+### 3.10 Skill 组合模式
+
+| 场景 | 推荐 Skill 序列 |
+|------|----------------|
+| **新功能开发** | requirements-definition → speckit-specify → speckit-plan → speckit-tasks → speckit-implement（每阶段独立 session） |
+| **Bug 修复** | systematic-debugging → test-driven-development → selftest |
+| **代码审查** | code-review → 若发现问题 → code-simplification 或重写 |
+| **Session 退役** | md-update（持久化）→ selftest（自审）→ PM 审查 → 退役 |
+| **重构** | code-simplification → code-review → selftest |
+| **安全审计** | security-and-hardening → code-review |
+| **性能优化** | performance-optimization（先测量）→ incremental-implementation（改一点测一点） |
+
+---
+
+## 四、执行规范
 
 ### 3.1 黄金法则（不变）
 
@@ -413,7 +529,7 @@ AI session 的注意力会随上下文增长而衰减。PM 必须识别以下信
 
 ---
 
-## 四、质量门
+## 五、质量门
 
 ### 4.1 任务启动前
 
@@ -438,9 +554,9 @@ AI session 的注意力会随上下文增长而衰减。PM 必须识别以下信
 
 ---
 
-## 五、红线
+## 六、红线
 
-### 5.1 技术红线
+### 6.1 技术红线
 
 | 违规 | 后果 |
 |------|------|
@@ -450,7 +566,7 @@ AI session 的注意力会随上下文增长而衰减。PM 必须识别以下信
 | 手动拼接 curl 替代 `poll_command` | 平台兼容问题 |
 | 内容不截断直接传递 | hex escape 错误 / token 爆炸 |
 
-### 5.2 PM 级别红线
+### 6.2 PM 级别红线
 
 | 违规 | 为什么致命 |
 |------|-----------|
@@ -471,10 +587,11 @@ AI session 的注意力会随上下文增长而衰减。PM 必须识别以下信
 
 ---
 
-## 六、版本对应
+## 七、版本对应
 
 | Tunnel 版本 | 关键变更 |
 |-------------|----------|
+| v2.3 | Skill 调度指南（§三）——39 个 skill 按 PM 场景分类；PM 自身技能与任务技能分离 |
 | v2.2 | 统筹 Session 定位升级为项目经理角色；新增 PM 决策框架、质量门、工作分解规范 |
 | v2.1 | `sanitizeText` 反斜杠预加固 + 控制字符清洗；`max_content_length` 可配截断 |
 | v2.0 | 自适应工作流引擎；即发即返模式；WS 状态缓存 |
