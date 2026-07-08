@@ -1,6 +1,7 @@
 <!--
 修改记录:
-  2026-07-08 | kimi-code (v2.5) | 实施 002-session-memory-share：三层共享内存系统——MemoryStore（node:sqlite 零依赖）+ 6个MCP工具（memory_set/get/list/delete/status/archive）+ 自动注入（create_session/execute_prompt）；冷启动token节省83%+；工具总数 22→28；selftest通过
+  2026-07-08 | kimi-code (v2.6) | 实施 004-memory-lazy-inject：注入策略升级——全量预载 → 索引+按需自读（minimal/standard/full 三级）；角色锚定"你是任务 session"；>20条自动折叠；注入文本 ~600B→~200B；Live test 通过
+  2026-07-08 | kimi-code (v2.5) | 实施 002-session-memory-share：三层共享内存系统——MemoryStore（node:sqlite 零依赖）+ 8个MCP工具（memory_*）+ 自动注入（create_session/execute_prompt）
   2026-07-07 | kimi-code (v2.4) | 实施 003-permission-policy：三层权限系统——策略引擎 + 工具级拦截 + 3内置策略 + 自定义YAML + 3新MCP工具（list_policies/approve_tool/deny_tool）；工具总数 19→22；selftest通过
   2026-07-07 | kimi-code (v2.3) | PM Dashboard 重写 + 监控页面升级；coordinator-guide v2.3（PM范式/Skill调度/注意力管理/越权控制）；2个新spec（002/003）；竞品分析+系统调研
   2026-07-07 | kimi-code (fix) | sanitizeText 反斜杠预加固 + maxContentLength 参数：防御 hex escape 错误，解决审计报告截断
@@ -16,7 +17,7 @@
 
 # Kimi Debug Tunnel
 
-基于 REST API 的 Kimi Code CLI 调试隧道——推送式全自动化 session 编排，无需轮询。
+基于 REST API 的 Kimi Code CLI 调试隧道——PM 视角多 session 编排，28 个 MCP 工具，支持自适应工作流引擎 + 三层共享内存 + 权限策略管理。
 
 ## 架构
 
@@ -28,7 +29,9 @@
 │   ├─ Express HTTP Server      │
 │   ├─ WebSocket Server         │
 │   ├─ WireClient (REST + WS推送 + 心跳重连) │
-│   ├─ SessionWatcher (后台监听)     │
+│   ├─ WorkflowEngine (自适应工作流)      │
+│   ├─ PolicyEngine (权限策略引擎)       │
+│   ├─ MemoryStore (SQLite 共享记忆)     │
 │   └─ MCP stdio transport      │
 └─────────────┬────────────────┘
               ↕ Bearer Token REST API
@@ -42,8 +45,9 @@
 
 ### 前置条件
 
-- Node.js ≥ 18
-- Kimi Code CLI ≥ 0.20.1
+- **Node.js ≥ 22**（`node:sqlite` 内置模块要求）
+- Kimi Code CLI ≥ 0.22.3
+- Git Bash（Windows）或 bash（Linux/macOS）
 
 ### 安装
 
@@ -67,18 +71,18 @@ export KIMI_SERVER_TOKEN="your-token-here"
 npm start
 ```
 
-Tunnel 启动后自动连接 Kimi Server 并选择最近的 session。
+Tunnel 启动后自动连接 Kimi Server，选择最近 session，初始化记忆库（如 `.kimi-tunnel/` 存在）。
 
 ### 注册到 Kimi Code CLI
 
-在 `~/.kimi-code/mcp.json` 中添加：
+在 `~/.kimi-code/mcp.json` 中添加（路径按实际安装位置调整）：
 
 ```json
 {
   "mcpServers": {
     "kimi-debug-tunnel": {
       "command": "node",
-      "args": ["C:/Users/FirenzeClaw/kimi-debug-tunnel/dist/index.js"],
+      "args": ["<项目绝对路径>/dist/index.js"],
       "env": {
         "KIMI_SERVER_TOKEN": "your-token-here"
       }
@@ -91,36 +95,70 @@ Tunnel 启动后自动连接 Kimi Server 并选择最近的 session。
 
 ## MCP 工具
 
+### Session 管理
+
 | 工具 | 描述 |
 |------|------|
-| `execute_prompt` | 发送 prompt 并等待回复（支持 `auto_mode` + `wait` 即发即返） |
-| `chat_with_session` | 全自动多轮编排，支持 `auto_mode` + `wait` 即发即返 |
-| `create_session` | 创建新 session，支持指定工作目录和权限模式（auto/manual/yolo） |
-| `list_sessions` | 列出所有 session |
-| `get_session_info` | 查看 session 详情（含 wire.jsonl 路径） |
-| `read_session_log` | 读取对话日志，支持分页和增量读取 |
-| `list_io_records` | 快速提取输入输出记录，过滤工具调用/思考链噪音 |
-| `poll_session` | 结构化轮询 session 运行状态（active/swarm/awaiting/done/error/idle） |
-| `run_flow` | 分步流程执行引擎：创建 session 后逐步提交任务，后台轮询等每步完成 |
-| `stream_response` | 实时推送结果到所有 WebSocket 客户端 |
-| `get_tunnel_status` | Wire 连接状态、客户端数、运行时间 |
-| `learn_workflow` | 从口头描述或历史 session 学习工作流，生成 YAML 模板 |
-| `list_templates` | 列出所有可用的工作流模板 |
-| `execute_workflow` | 执行工作流模板：创建任务 session，逐步下发指令，自适应调整 |
-| `continue_workflow` | 对暂停的工作流执行决策（重试/跳过/终止/手动覆盖） |
-| `watch_session` | 启动 WS 后台监听，主动等待任务 session 完成 |
+| `create_session` | 创建新 session，支持 cwd/permission_mode/memory_level/from_session/policy |
+| `list_sessions` | 列出所有 session（按更新时间倒序） |
+| `get_session_info` | 查看 session 详情（含 wire.jsonl 路径、标题、cwd） |
+| `get_tunnel_status` | Wire 连接状态、客户端数、运行时间、WS 连接状态 |
+
+### 任务下发
+
+| 工具 | 描述 |
+|------|------|
+| `execute_prompt` | 发送 prompt（即发即返），支持 auto_mode/thinking/policy/skip_memory |
+| `chat_with_session` | 向已有 session 发送任务（即发即返） |
+| `run_flow` | 多步流程：创建 session → 逐步下发 → 自动等待每步完成 |
+| `execute_workflow` | 执行工作流模板：加载模板 → 自动驱动 → 自适应调整 |
+| `continue_workflow` | 对暂停的工作流执行决策（retry/skip/abort/manual） |
+
+### 状态监控
+
+| 工具 | 描述 |
+|------|------|
+| `poll_session` | 结构化轮询 session 状态（WS 缓存优先，active/swarm/awaiting/done/error/idle） |
+| `list_io_records` | 快速提取 prompt ↔ 回复（过滤 tool_call/thinking 噪音） |
+| `read_session_log` | 读取完整对话日志，支持分页和增量 |
+| `watch_session` | WS 后台监听，主动等待 session 完成 |
 | `get_watch_result` | 获取后台监听结果（非阻塞） |
-| `continue_watch` | 拿结果+自动发下一步指令+启动新监听，形成自动化循环 |
-| `set_watch_output` | 设置监听输出文件，完成后自动写入结果到本地文件 |
-| `memory_set` | 写入键值对到共享内存命名空间，自动记录来源和版本 |
-| `memory_get` | 读取共享内存条目，支持按 key/namespace 过滤 |
-| `memory_list` | 列出命名空间下所有键名，支持前缀匹配 |
-| `memory_delete` | 删除共享内存条目，仅创建者可删除 |
-| `memory_status` | 查看知识库整体状态——条目数、过期数、命名空间分布 |
-| `memory_archive` | 将 session 的 L2 findings 归档为 L1 learnings |
-| `list_policies` | 列出所有可用策略（内置 + 自定义），含验证状态 |
-| `approve_tool` | PM 放行被策略阻断的工具调用（once/session scope） |
-| `deny_tool` | PM 拒绝被策略阻断或待审批的工具调用 |
+| `continue_watch` | 拿结果 + 发下一步 + 启动新监听 |
+
+### 共享记忆（v2.5+）
+
+| 工具 | 描述 |
+|------|------|
+| `memory_set` | 写入键值对到命名空间，自动版本递增 |
+| `memory_get` | 读取条目，支持 namespace/key 过滤 + 过期条目 |
+| `memory_list` | 列出命名空间键名（前缀匹配） |
+| `memory_delete` | 删除指定条目 |
+| `memory_status` | 知识库全景：条目数、命名空间分布、最后更新 |
+| `memory_archive` | 将 session L2 findings 归档为 L1 learnings |
+
+> **v2.6 注入策略**：`create_session(memory_level)` 自动注入**记忆索引**（命名空间 + 键名 + 读取建议），task session 首 turn 自主调用 `memory_get` 按需拉取。注入文本从 ~600B 降至 ~200B。
+
+### 工作流模板
+
+| 工具 | 描述 |
+|------|------|
+| `learn_workflow` | 从描述或历史 session 学习工作流，生成 YAML 模板 |
+| `list_templates` | 列出可用模板（名称、版本、步骤数） |
+
+### 权限策略
+
+| 工具 | 描述 |
+|------|------|
+| `list_policies` | 列出内置 + 自定义策略，含验证状态 |
+| `approve_tool` | PM 放行被阻断的工具调用（once/session scope） |
+| `deny_tool` | PM 拒绝被阻断的工具调用 |
+
+### 推送
+
+| 工具 | 描述 |
+|------|------|
+| `stream_response` | 实时推送结果到所有 WebSocket 调试客户端 |
+| `set_watch_output` | 设置监听结果文件路径，完成后自动写入 |
 
 ## REST API
 
@@ -151,57 +189,163 @@ curl -X POST http://localhost:3456/api/execute \
 
 ```
 src/
-├── index.ts                 # 入口：创建 TunnelServices，启动 HTTP+MCP
-├── types.ts                 # TunnelServices 依赖注入接口
-├── mcp-server.ts            # MCP stdio 服务器（注册 18 个工具）
-├── http-server.ts           # Express + WebSocket 装配入口
-├── wire-client.ts           # Kimi Server REST + WS 推送 + 心跳探测自动重连
-├── message-queue.ts         # WebSocket pub/sub 广播
-├── session-store.ts         # 文件系统扫描 + 路径解析
-├── session-log-reader.ts    # wire.jsonl 日志解析 + IO 提取 + 状态轮询
-├── session-orchestrator.ts  # 多轮任务编排引擎
-├── workflow-template.ts     # 模板类型定义 + YAML 解析 + Zod 校验
-├── workflow-store.ts        # 模板持久化（CRUD）
-├── workflow-engine.ts       # 自适应工作流引擎
-├── session-watcher.ts        # WS 后台监听器
-├── policy-types.ts          # 策略类型 + Zod schema + 已知工具清单
-├── policy-builtins.ts       # 3个内置策略
-├── policy-store.ts          # YAML 策略文件 CRUD
-├── policy-engine.ts         # 策略引擎：解析/检查/绑定 + BlockEvent追踪
+├── index.ts                   # 入口：DI 装配，启动 HTTP+MCP，初始化记忆库
+├── types.ts                   # TunnelServices 接口（wireClient/messageQueue/workflowEngine/policyEngine/memoryStore/tunnelProjectRoot）
+├── mcp-server.ts              # MCP stdio 服务器（注册 28 个工具）
+├── http-server.ts             # Express + WebSocket 装配入口
+├── wire-client.ts             # Kimi Server REST + WS 推送 + 心跳探测自动重连
+├── message-queue.ts           # WebSocket pub/sub 广播
+├── session-store.ts           # 文件系统扫描 + 路径解析
+├── session-log-reader.ts      # wire.jsonl 日志解析 + IO 提取 + sanitizeText
+├── workflow-template.ts       # 模板类型定义 + YAML 解析 + Zod 校验
+├── workflow-store.ts          # 模板持久化（templates/ CRUD）
+├── workflow-engine.ts         # 自适应工作流引擎
+├── policy-types.ts            # 策略类型 + Zod schema + 已知工具清单
+├── policy-builtins.ts         # read-only / safe-edit / full-access
+├── policy-store.ts            # YAML 策略文件 CRUD（.kimi-tunnel/policies/）
+├── policy-engine.ts           # 策略解析/检查/绑定 + BlockEvent 追踪
+├── memory-store.ts            # SQLite 持久化 + buildInjection()（索引注入）
+├── memory-injector.ts         # 注入文本构建（thin wrapper → memory-store）
 ├── tools/
-│   ├── execute-prompt.ts    # 发送 prompt 并等待完整回复
-│   ├── chat-with-session.ts # 全自动多轮编排
-│   ├── create-session.ts    # 通过 REST API 创建新 session
-│   ├── stream-response.ts   # 实时推送到 WebSocket 客户端
-│   ├── list-sessions.ts     # 列出所有 session
-│   ├── get-session-info.ts  # 查看 session 详情
-│   ├── read-session-log.ts  # 读取对话日志
-│   ├── list-io-records.ts   # 快速查看输入输出记录
-│   ├── poll-session.ts      # 结构化轮询 session 状态
-│   ├── run-flow.ts           # 分步流程执行引擎
-│   ├── learn-workflow.ts    # 从描述或历史 session 学习模板
-│   ├── execute-workflow.ts  # 执行工作流模板
-│   ├── list-workflow-templates.ts # 列出可用模板
-│   ├── continue-workflow.ts # 暂停工作流的决策处理
-│   ├── session-watch.ts     # 后台监听工具 (watch/get/continue/set_watch)
-│   ├── list-policies.ts     # 列出可用策略（内置+自定义，含验证状态）
-│   ├── approve-tool.ts      # PM 放行被阻断的工具调用
-│   ├── deny-tool.ts         # PM 拒绝被阻断的工具调用
-│   └── get-tunnel-status.ts # Wire 连接状态、客户端数、运行时间（含 wsConnected）
+│   ├── create-session.ts      # 创建新 session（含 memory_level/policy）
+│   ├── execute-prompt.ts      # 发送 prompt（即发即返 + 自动注入）
+│   ├── chat-with-session.ts   # 多轮编排
+│   ├── list-sessions.ts       # 列出所有 session
+│   ├── get-session-info.ts    # 查看 session 详情
+│   ├── read-session-log.ts    # 读取对话日志
+│   ├── list-io-records.ts     # 快速 IO 提取
+│   ├── poll-session.ts        # 结构化状态轮询
+│   ├── run-flow.ts            # 多步流程执行
+│   ├── stream-response.ts     # WebSocket 推送
+│   ├── get-tunnel-status.ts   # 隧道状态
+│   ├── learn-workflow.ts      # 学习工作流
+│   ├── execute-workflow.ts    # 执行工作流模板
+│   ├── list-workflow-templates.ts # 列出模板
+│   ├── continue-workflow.ts   # 工作流决策
+│   ├── session-watch.ts       # watch_session/get_watch_result/continue_watch/set_watch_output
+│   ├── memory-set.ts          # 写入记忆条目
+│   ├── memory-get.ts          # 读取记忆条目
+│   ├── memory-list.ts         # 列出记忆键名
+│   ├── memory-delete.ts       # 删除记忆条目
+│   ├── memory-status.ts       # 记忆库状态
+│   ├── memory-archive.ts      # 归档 session findings
+│   ├── list-policies.ts       # 列出策略
+│   ├── approve-tool.ts        # 放行阻断工具
+│   └── deny-tool.ts           # 拒绝阻断工具
 └── public/
-    ├── console.html          # Web 调试控制台 (v2.3)
-    └── workflow-console.html # PM Dashboard 监管面板
+    ├── console.html           # Web 调试控制台
+    └── workflow-console.html  # PM Dashboard 监管面板（四区：健康/阻断/工作流/Skill）
 ```
+
+## 共享记忆系统（v2.5+）
+
+```
+┌─────────────────────────────────────────────────┐
+│ L1: 项目知识库 (.kimi-tunnel/memory.db)          │
+│ PM 一次性录入 → task session 启动时自动注入索引    │
+│ project/meta / decisions / risks / learnings    │
+├─────────────────────────────────────────────────┤
+│ L2: Session 上下文 (session:<id>/*)             │
+│ 创建时写入，运行时更新，退役后归档                  │
+├─────────────────────────────────────────────────┤
+│ L3: 学习沉淀 (learn skill → 向量库)              │
+│ 从 L1+L2 提取可复用模式                          │
+└─────────────────────────────────────────────────┘
+
+PM 操作:                            Task session 首 turn:
+  memory_set(ns, key, value)         → 收到索引 → memory_get(ns)
+  create_session(memory_level=full)  → 评估关联 → 拉取条目 → 执行任务
+  execute_prompt(task)               → 同一 turn 完成上下文建立 + 工作
+```
+
+## 权限策略系统（v2.4+）
+
+- **三层架构**：Session 级策略（create_session policy 参数） + 任务级策略（execute_prompt policy 参数） + 工具级拦截（WireClient approveAll）
+- **3 内置策略**：`read-only`（只读）/ `safe-edit`（安全编辑，禁 shell 命令）/ `full-access`（全部允许）
+- **自定义 YAML**：`.kimi-tunnel/policies/<name>.yaml`
+- **PM Dashboard**：实时阻断事件面板，支持 approve/deny（once/session scope）
 
 ## 参考文档
 
 | 文档 | 用途 |
 |------|------|
 | `API.md` | Kimi Server REST API 完整参考 |
-| `docs/coordinator-guide.md` | 统筹 Session 准入规范（PM视角 v2.3） |
+| `docs/coordinator-guide.md` | 统筹 Session 准入规范（PM视角 v2.6） |
+| `docs/issues/memory-init-timing.md` | [FIXED] MemoryStore 启动初始化缺陷 |
+| `docs/issues/memory-cross-project-injection.md` | [FIXED] 跨项目注入静默失效 |
 | `specs/001-adaptive-workflow-engine/` | 自适应工作流引擎 [DONE] |
-| `specs/002-session-memory-share/` | Session 冷启动记忆共享 [WIP] |
+| `specs/002-session-memory-share/` | Session 冷启动记忆共享 [DONE] |
 | `specs/003-permission-policy/` | 权限与策略管理 [DONE] |
+| `specs/004-memory-lazy-inject/` | 记忆注入策略升级——索引+按需自读 [DONE] |
+
+## Linux 部署
+
+### 前置条件
+
+```bash
+node -v   # ≥ 22
+kimi --version  # ≥ 0.22.3
+```
+
+### 一键部署
+
+```bash
+git clone https://github.com/FirenzeClaw/kimi-debug-tunnel.git
+cd kimi-debug-tunnel
+npm install && npm run build
+```
+
+### 启动
+
+```bash
+# 终端 1: Kimi Server
+kimi web --no-open --port 5494
+# 记下输出的 Token
+
+# 终端 2: Tunnel
+export KIMI_SERVER_TOKEN="<token>"
+npm start
+```
+
+### 注册 MCP
+
+```bash
+mkdir -p ~/.kimi-code
+
+cat > ~/.kimi-code/mcp.json << 'EOF'
+{
+  "mcpServers": {
+    "kimi-debug-tunnel": {
+      "command": "node",
+      "args": ["/home/user/kimi-debug-tunnel/dist/index.js"],
+      "env": {
+        "KIMI_SERVER_TOKEN": "<token>"
+      }
+    }
+  }
+}
+EOF
+```
+
+> **注意**：`args` 中的路径需为绝对路径，按实际 clone 位置调整。`/reload` 后生效。
+
+### 构建脚本 Linux 兼容
+
+项目 `package.json` 的 build 脚本使用 `cp -r`，兼容 Linux。若 `dist/public/` 不存在：
+
+```bash
+mkdir -p dist/public && npm run build
+```
+
+### 兼容性确认
+
+| 组件 | Linux | 备注 |
+|------|:--:|------|
+| `node:sqlite` | ✅ | Node 22+ 内置 |
+| `path.join/dirname` | ✅ | 全项目使用跨平台 API |
+| 文件路径 | ✅ | 统一 `replace(/\\/g, "/")` 归一化 |
+| MCP stdio | ✅ | 标准协议 |
+| Kimi Server CLI | ✅ | `kimi web` 跨平台 |
 
 ## License
 
