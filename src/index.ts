@@ -33,7 +33,15 @@ async function main(): Promise<void> {
     process.stderr.write("[kimi-debug-tunnel] Memory DB: .kimi-tunnel/ not found under CWD, deferred\n");
   }
 
-  const services: TunnelServices = { wireClient, messageQueue, startTime: Date.now(), workflowEngine, policyEngine, memoryStore };
+  const services: TunnelServices = {
+    wireClient,
+    messageQueue,
+    startTime: Date.now(),
+    workflowEngine,
+    policyEngine,
+    memoryStore,
+    tunnelProjectRoot: projectRoot,  // for cross-project injection (SPEC 002)
+  };
 
   // Start HTTP + WebSocket server for external clients
   startHttpServer(PORT, services);

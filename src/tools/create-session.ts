@@ -84,29 +84,26 @@ export function registerCreateSession(server: McpServer, services: TunnelService
         }
 
         // Bind memory profile if level != "off" (SPEC 002)
-        if (memory_level !== "off" && services.memoryStore) {
+        if (memory_level !== "off" && services.memoryStore && services.tunnelProjectRoot) {
           try {
-            const projectRoot = services.memoryStore.resolveProjectRoot(cwd);
-            if (projectRoot) {
-              services.memoryStore.ensureDb(projectRoot);
-              // Check for expired entries in relevant namespaces
-              const nsToCheck = memory_level === "minimal"
-                ? ["project/meta"]
-                : memory_level === "standard"
-                ? ["project/meta", "project/decisions"]
-                : ["project/meta", "project/decisions", "project/risks", "project/learnings"];
-              let hasExpired = false;
-              for (const ns of nsToCheck) {
-                const entries = services.memoryStore.get(ns);
-                if (entries.some((e) => e.expired)) { hasExpired = true; break; }
-              }
-              wireClient.setMemoryProfile(result.sessionId, {
-                level: memory_level,
-                cwd,
-                fromSession: from_session,
-                hasExpiredEntries: hasExpired,
-              });
+            services.memoryStore.ensureDb(services.tunnelProjectRoot);
+            // Check for expired entries in relevant namespaces
+            const nsToCheck = memory_level === "minimal"
+              ? ["project/meta"]
+              : memory_level === "standard"
+              ? ["project/meta", "project/decisions"]
+              : ["project/meta", "project/decisions", "project/risks", "project/learnings"];
+            let hasExpired = false;
+            for (const ns of nsToCheck) {
+              const entries = services.memoryStore.get(ns);
+              if (entries.some((e) => e.expired)) { hasExpired = true; break; }
             }
+            wireClient.setMemoryProfile(result.sessionId, {
+              level: memory_level,
+              cwd,
+              fromSession: from_session,
+              hasExpiredEntries: hasExpired,
+            });
           } catch {
             // Memory store setup failure is non-fatal; session creation succeeds anyway
           }

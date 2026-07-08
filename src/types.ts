@@ -76,4 +76,6 @@ export interface TunnelServices {
   workflowEngine?: IWorkflowEngine;
   policyEngine?: IPolicyEngine;
   memoryStore?: IMemoryStore;
+  /** Tunnel 自身的项目根目录，用于跨项目 session 注入时定位 memory.db */
+  tunnelProjectRoot?: string | null;
 }

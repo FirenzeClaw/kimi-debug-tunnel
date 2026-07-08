@@ -82,14 +82,12 @@ export function registerExecutePrompt(server: McpServer, services: TunnelService
 
         // Bind memory injection context if profile exists (SPEC 002)
         let effectivePrompt = prompt;
-        if (!skip_memory && services.memoryStore) {
+        if (!skip_memory && services.memoryStore && services.tunnelProjectRoot) {
           const profile = wireClient.getMemoryProfile(session_id);
           if (profile && profile.level !== "off") {
             try {
-              const projectRoot = services.memoryStore.resolveProjectRoot(profile.cwd);
-              if (projectRoot) {
-                services.memoryStore.ensureDb(projectRoot);
-                const injection = services.memoryStore.buildInjection({
+              services.memoryStore.ensureDb(services.tunnelProjectRoot);
+              const injection = services.memoryStore.buildInjection({
                   level: profile.level as "off" | "minimal" | "standard" | "full",
                   maxBytes: 8192,
                   fromSession: profile.fromSession,
@@ -102,7 +100,6 @@ export function registerExecutePrompt(server: McpServer, services: TunnelService
                     : "";
                   effectivePrompt = `${warning}${injection}\n\n---\n\n${prompt}`;
                 }
-              }
             } catch {
               // Non-fatal: memory injection failure shouldn't block prompt submission
             }

@@ -37,14 +37,12 @@ export function registerChatWithSession(server: McpServer, services: TunnelServi
 
       // Bind memory injection context (SPEC 002)
       let effectiveTask = task;
-      if (!skip_memory && services.memoryStore) {
+      if (!skip_memory && services.memoryStore && services.tunnelProjectRoot) {
         const profile = wireClient.getMemoryProfile(session_id);
         if (profile && profile.level !== "off") {
           try {
-            const projectRoot = services.memoryStore.resolveProjectRoot(profile.cwd);
-            if (projectRoot) {
-              services.memoryStore.ensureDb(projectRoot);
-              const injection = services.memoryStore.buildInjection({
+            services.memoryStore.ensureDb(services.tunnelProjectRoot);
+            const injection = services.memoryStore.buildInjection({
                 level: profile.level as "off" | "minimal" | "standard" | "full",
                 maxBytes: 8192,
                 fromSession: profile.fromSession,
@@ -57,7 +55,6 @@ export function registerChatWithSession(server: McpServer, services: TunnelServi
                   : "";
                 effectiveTask = `${warning}${injection}\n\n---\n\n${task}`;
               }
-            }
           } catch { /* non-fatal */ }
         }
       }
