@@ -86,14 +86,13 @@ export function registerExecuteWorkflow(server: McpServer, services: TunnelServi
       // Bind policy if specified — passed through to engine which binds after session creation
       // (no placeholder binding here; engine.execute() receives policy option)
 
-      // Run engine (shared wireClient from services)
-      const engine = new WorkflowEngine(wireClient, services.messageQueue);
+      // Run engine (use shared workflowEngine from services — already wired with memory store)
+      const engine = (services.workflowEngine ?? new WorkflowEngine(wireClient, services.messageQueue)) as WorkflowEngine;
 
       // Start execution (async, non-blocking for the tool)
       // The engine will push progress via WebSocket
       engine
-        .execute(template, { autoMode: auto_mode, model, thinking, policy })
-        // TODO(SPEC-002): pass memoryLevel/fromSession to engine when WorkflowEngine supports them
+        .execute(template, { autoMode: auto_mode, model, thinking, policy, memory_level, from_session })
         .then((result) => {
           process.stderr.write(
             `[workflow-engine] "${template_name}" completed: ${result.status}\n`

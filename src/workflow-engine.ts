@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { WorkflowProgress } from "./types.js";
+import type { WorkflowProgress, IMemoryStore } from "./types.js";
 import { WireClient } from "./wire-client.js";
 import type { MessageQueue } from "./message-queue.js";
 import type {
@@ -116,10 +116,18 @@ export class WorkflowEngine {
   private wireClient: WireClient;
   private messageQueue: MessageQueue;
   private activeExecutions = new Map<string, ActiveExecution>();
+  private memoryStore: IMemoryStore | null = null;
+  private tunnelProjectRoot: string | null = null;
 
   constructor(wireClient: WireClient, messageQueue: MessageQueue) {
     this.wireClient = wireClient;
     this.messageQueue = messageQueue;
+  }
+
+  /** Set memory store for injecting shared knowledge into workflow sessions. */
+  setMemoryStore(store: IMemoryStore, projectRoot: string | null): void {
+    this.memoryStore = store;
+    this.tunnelProjectRoot = projectRoot;
   }
 
   /**
@@ -133,10 +141,12 @@ export class WorkflowEngine {
       model?: string;
       thinking?: string;
       policy?: string;
+      memory_level?: string;
+      from_session?: string;
       onProgress?: (progress: WorkflowProgress) => void;
     }
   ): Promise<WorkflowResult> {
-    const { autoMode, onProgress, model, thinking, policy } = options;
+    const { autoMode, onProgress, model, thinking, policy, memory_level, from_session } = options;
     const executionId = randomUUID();
     const startTime = Date.now();
     const originalSessionId = this.wireClient.getSessionId();
@@ -175,6 +185,36 @@ export class WorkflowEngine {
           this.wireClient.setSessionPolicy(sessionId, policy, template.projectCwd);
         } catch (policyErr) {
           process.stderr.write(`[workflow-engine] Policy binding warning: ${(policyErr as Error).message}\n`);
+        }
+      }
+
+      // Store memory profile for auto-injection on first step (SPEC 002)
+      if (memory_level && memory_level !== "off") {
+        try {
+          if (this.memoryStore && this.tunnelProjectRoot) {
+            this.memoryStore.ensureDb(this.tunnelProjectRoot);
+            // Check for expired entries in relevant namespaces
+            const nsToCheck = memory_level === "minimal"
+              ? ["project/meta"]
+              : memory_level === "standard"
+              ? ["project/meta", "project/decisions"]
+              : ["project/meta", "project/decisions", "project/risks", "project/learnings"];
+            let hasExpired = false;
+            for (const ns of nsToCheck) {
+              const entries = this.memoryStore.get(ns);
+              if (entries.some((e) => e.expired)) { hasExpired = true; break; }
+            }
+            this.wireClient.setMemoryProfile(sessionId, {
+              level: memory_level,
+              cwd: template.projectCwd,
+              fromSession: from_session,
+              hasExpiredEntries: hasExpired,
+            });
+            process.stderr.write(`[workflow-engine] Memory profile set for ${sessionId} (level: ${memory_level})\n`);
+          }
+        } catch (memErr) {
+          // Non-fatal: memory injection failure shouldn't block workflow
+          process.stderr.write(`[workflow-engine] Memory profile warning: ${(memErr as Error).message}\n`);
         }
       }
 
@@ -316,8 +356,33 @@ export class WorkflowEngine {
       attempt++;
 
       try {
+        // Build effective instruction — inject shared memory on first step (SPEC 002)
+        let instruction = step.instruction;
+        if (stepIndex === 0 && this.memoryStore && this.tunnelProjectRoot) {
+          const profile = this.wireClient.getMemoryProfile(sessionId);
+          if (profile && profile.level !== "off") {
+            try {
+              const injection = this.memoryStore.buildInjection({
+                level: profile.level as "off" | "minimal" | "standard" | "full",
+                maxBytes: 8192,
+                fromSession: profile.fromSession,
+                cwd: profile.cwd,
+                hasExpiredEntries: profile.hasExpiredEntries,
+              });
+              if (injection) {
+                const warning = profile.hasExpiredEntries
+                  ? "⚠️ 警告: 以下注入的部分条目已被 PM 标记为过期，内容可能不是最新。\n\n"
+                  : "";
+                instruction = `${warning}${injection}\n\n---\n\n${instruction}`;
+              }
+            } catch {
+              // Non-fatal: memory injection failure shouldn't block the step
+            }
+          }
+        }
+
         // Send instruction and wait for response
-        const response = await this.wireClient.sendPrompt(step.instruction, {
+        const response = await this.wireClient.sendPrompt(instruction, {
           timeoutMs: template.timeout.perStep,
           autoApprove: autoMode,
         });

@@ -16,7 +16,7 @@ export interface WorkflowProgress {
 }
 
 export interface IWorkflowEngine {
-  execute(template: unknown, options: { autoMode: boolean; model?: string; thinking?: string; policy?: string; onProgress?: (p: WorkflowProgress) => void }): Promise<WorkflowResult>;
+  execute(template: unknown, options: { autoMode: boolean; model?: string; thinking?: string; policy?: string; memory_level?: string; from_session?: string; onProgress?: (p: WorkflowProgress) => void }): Promise<WorkflowResult>;
   handleBlockage(executionId: string, decision: "retry" | "skip" | "abort" | "manual", options?: { instruction?: string }): Promise<WorkflowResult | null>;
   getExecution(executionId: string): {
     executionId: string; template: string; sessionId: string;
@@ -25,6 +25,7 @@ export interface IWorkflowEngine {
   getFlow(sessionId: string): {
     executionId: string; status: string; currentStep: number; totalSteps: number;
   } | null;
+  setMemoryStore(store: IMemoryStore, projectRoot: string | null): void;
 }
 
 // === Memory Store Types (SPEC 002) ===

@@ -22,9 +22,9 @@ async function main(): Promise<void> {
   wireClient.setPolicyEngine(policyEngine);
   wireClient.setMessageQueue(messageQueue);
 
+  // Wire memory store to workflow engine for auto-injection (SPEC 002)
+  // This also avoids repeating memory setup in each tool file
   // Initialize memory DB eagerly so all 6 memory_* MCP tools are usable
-  // without requiring a session tool (create_session/execute_prompt) call first.
-  // Fixes: docs/issues/memory-init-timing.md
   const projectRoot = memoryStore.resolveProjectRoot(process.cwd());
   if (projectRoot) {
     memoryStore.ensureDb(projectRoot);
@@ -32,6 +32,7 @@ async function main(): Promise<void> {
   } else {
     process.stderr.write("[kimi-session-orchestrator] Memory DB: .kimi-tunnel/ not found under CWD, deferred\n");
   }
+  workflowEngine.setMemoryStore(memoryStore, projectRoot);
 
   const services: TunnelServices = {
     wireClient,
@@ -62,17 +63,19 @@ async function main(): Promise<void> {
     }
   } catch (err) {
     process.stderr.write(
-      `[kimi-session-orchestrator] WARNING: Kimi server not available: ${(err as Error).message}\n`
+      `[kimi-session-orchestrator] WARNING: Kimi server not available at ${process.env.KIMI_SERVER_URL || "http://127.0.0.1:5494"}: ${(err as Error).message}\n`
     );
     process.stderr.write(
-      "[kimi-session-orchestrator] Start with: kimi web --no-open\n"
+      "[kimi-session-orchestrator] Start with: kimi web --no-open --port 5494\n"
     );
     process.stderr.write(
       "[kimi-session-orchestrator] Set KIMI_SERVER_TOKEN env var if auth required\n"
     );
     process.stderr.write(
-      "[kimi-session-orchestrator] Falling back to basic tools (execute_prompt/chat_with_session will not work)\n"
+      "[kimi-session-orchestrator] Starting periodic reconnection (every 10s). Tools will auto-retry.\n"
     );
+    // Start periodic reconnection — health check will keep retrying connect()
+    wireClient.startHealthCheck();
   }
 
   // Start MCP stdio server for Kimi Code CLI

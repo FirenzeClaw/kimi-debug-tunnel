@@ -101,6 +101,7 @@ export class WireClient {
   // Health check: periodically ping the server to detect silent crashes
   private healthCheckTimer: ReturnType<typeof setInterval> | null = null;
   private healthFailCount = 0;
+  private connecting = false; // guard against concurrent connect() calls
   private static HEALTH_CHECK_INTERVAL_MS = 10_000;
   private static HEALTH_MAX_FAILS = 3;
   // Policy engine: checks tool calls against session policies
@@ -219,48 +220,55 @@ export class WireClient {
 
   async connect(): Promise<void> {
     if (this.connected) return;
+    if (this.connecting) return; // prevent concurrent connection attempts
+    this.connecting = true;
 
-    const maxRetries = 3;
-    const retryDelayMs = 2000;
+    try {
+      // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s — up to ~63s total
+      const delays = [1000, 2000, 4000, 8000, 16000, 32000];
 
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        const metaResp = await this.transport.apiGet<{
-          server_version: string;
-          capabilities: Record<string, boolean>;
-        }>("/api/v1/meta");
-        this.connected = true;
-        this.healthFailCount = 0;
-        process.stderr.write(
-          `[wire-client] Connected to Kimi server v${metaResp.server_version} (session: ${this.sessionId || "none"})\n`
-        );
+      for (let attempt = 0; attempt < delays.length; attempt++) {
+        try {
+          const metaResp = await this.transport.apiGet<{
+            server_version: string;
+            capabilities: Record<string, boolean>;
+          }>("/api/v1/meta");
+          this.connected = true;
+          this.healthFailCount = 0;
+          process.stderr.write(
+            `[wire-client] Connected to Kimi server v${metaResp.server_version} (session: ${this.sessionId || "none"})\n`
+          );
 
-        // Connect WebSocket for push notifications
-        this.wsConnect().catch((err) => {
-          process.stderr.write(`[wire-client] WebSocket unavailable, falling back to polling: ${err.message}\n`);
-        });
+          // Connect WebSocket for push notifications
+          this.wsConnect().catch((err) => {
+            process.stderr.write(`[wire-client] WebSocket unavailable, falling back to polling: ${err.message}\n`);
+          });
 
-        // Start periodic health check to detect silent server crashes
-        this.startHealthCheck();
+          // Start periodic health check to detect silent server crashes
+          this.startHealthCheck();
 
-        return;
-      } catch (err) {
-        const isLastAttempt = attempt === maxRetries;
-        if (isLastAttempt) {
-          if (!this.token) {
+          return;
+        } catch (err) {
+          const isLastAttempt = attempt === delays.length - 1;
+          if (isLastAttempt) {
+            if (!this.token) {
+              throw new Error(
+                `Cannot connect to Kimi server at ${this.baseUrl}. Start with: kimi web --no-open. Then set KIMI_SERVER_TOKEN env var.`
+              );
+            }
             throw new Error(
-              `Cannot connect to Kimi server at ${this.baseUrl}. Start with: kimi web --no-open. Then set KIMI_SERVER_TOKEN env var.`
+              `Cannot connect to Kimi server at ${this.baseUrl}: ${(err as Error).message}`
             );
           }
-          throw new Error(
-            `Cannot connect to Kimi server at ${this.baseUrl}: ${(err as Error).message}`
+          const delay = delays[attempt];
+          process.stderr.write(
+            `[wire-client] Connection attempt ${attempt + 1}/${delays.length} failed: ${(err as Error).message}. Retrying in ${delay}ms...\n`
           );
+          await sleep(delay);
         }
-        process.stderr.write(
-          `[wire-client] Connection attempt ${attempt + 1} failed: ${(err as Error).message}. Retrying in ${retryDelayMs}ms...\n`
-        );
-        await sleep(retryDelayMs);
       }
+    } finally {
+      this.connecting = false;
     }
   }
 
@@ -784,7 +792,10 @@ export class WireClient {
   // Health check — detect silent server crashes and reconnect
   // ═══════════════════════════════════════════════════════════════════════════════
 
-  private startHealthCheck(): void {
+  /** Start periodic health check to detect server crashes and auto-reconnect.
+   *  Safe to call multiple times — stops any existing timer first.
+   *  Public so index.ts can start the reconnect loop even when initial connect() fails. */
+  startHealthCheck(): void {
     this.stopHealthCheck();
     this.healthCheckTimer = setInterval(async () => {
       try {
