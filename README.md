@@ -329,6 +329,19 @@ EOF
 
 > **注意**：`args` 中的路径需为绝对路径，按实际 clone 位置调整。`/reload` 后生效。
 
+### 安装 PM Skill
+
+将 skill 注册到 Agent 系统（skill 加载时自动读取 coordinator-guide 并询问 PM 模式）：
+
+```bash
+# 复制 skill 目录（含 SKILL.md + coordinator-guide.md）
+cp -r skills/kimi-session-orchestrator ~/.agents/skills/kimi-session-orchestrator
+
+# 新 session 自动加载，触发 PM 启动协议：
+#   ① 读取 coordinator-guide 建立规范基线
+#   ② 询问角色（PM/执行）+ 目标 + 决策模式（自主/等待）
+```
+
 ### 构建脚本 Linux 兼容
 
 项目 `package.json` 的 build 脚本使用 `cp -r`，兼容 Linux。若 `dist/public/` 不存在：

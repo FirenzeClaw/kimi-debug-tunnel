@@ -254,7 +254,7 @@ for m in data.get('items',[]):
 
 | Skill | 用途 | 文件 |
 |-------|------|------|
-| `kimi-session-orchestrator` | MCP 工具完整使用规范——即发即返、后台轮询、工具速查、红线规则 | `skills/kimi-session-orchestrator.md` |
+| `kimi-session-orchestrator` | MCP 工具完整使用规范——即发即返、后台轮询、工具速查、红线规则 | `skills/kimi-session-orchestrator/SKILL.md` |
 | `agent-session-monitor` | 通过 wire.jsonl 尾部日志推断 session 运行状态（无需 API 认证） | `skills/agent-session-monitor.md` |
 | `mcp-async-tool` | MCP 异步工具设计模式——解决 >30s 任务被协议超时截断的问题 | `skills/mcp-async-tool.md` |
 

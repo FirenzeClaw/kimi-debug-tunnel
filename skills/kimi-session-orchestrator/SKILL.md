@@ -13,7 +13,7 @@ description: 当需要操作 kimi-session-orchestrator MCP 工具时使用——
 
 ### 第一步：读取 PM 规范
 
-使用 `Read` 工具读取 `docs/coordinator-guide.md`，建立 PM 决策框架基线。
+使用 `Read` 工具读取本 skill 目录下的 `coordinator-guide.md`，建立 PM 决策框架基线。
 
 > 跳过此步 = 盲飞。coordinator-guide 定义了 PM 角色定位、工作分解规范、注意力管理、红线——必须先建立规范基线才能开始调度。
 
