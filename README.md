@@ -207,53 +207,53 @@ curl -X POST http://localhost:3456/api/execute \
 
 ```
 src/
-├── index.ts                   # 入口：DI 装配，启动 HTTP+MCP，初始化记忆库
-├── types.ts                   # TunnelServices 接口（wireClient/messageQueue/workflowEngine/policyEngine/memoryStore/tunnelProjectRoot）
-├── mcp-server.ts              # MCP stdio 服务器（注册 28 个工具）
-├── http-server.ts             # Express + WebSocket 装配入口
-├── wire-client.ts             # Kimi Server REST + WS 推送 + 心跳探测自动重连
-├── message-queue.ts           # WebSocket pub/sub 广播
-├── session-store.ts           # 文件系统扫描 + 路径解析
-├── session-log-reader.ts      # wire.jsonl 日志解析 + IO 提取 + sanitizeText
-├── workflow-template.ts       # 模板类型定义 + YAML 解析 + Zod 校验
-├── workflow-store.ts          # 模板持久化（templates/ CRUD）
-├── workflow-engine.ts         # 自适应工作流引擎
-├── policy-types.ts            # 策略类型 + Zod schema + 已知工具清单
-├── policy-builtins.ts         # read-only / safe-edit / full-access
-├── policy-store.ts            # YAML 策略文件 CRUD（.kimi-tunnel/policies/）
-├── policy-engine.ts           # 策略解析/检查/绑定 + BlockEvent 追踪
-├── memory-store.ts            # SQLite 持久化 + buildInjection()（索引注入）
-├── memory-injector.ts         # 注入文本构建（thin wrapper → memory-store）
-├── tools/
-│   ├── create-session.ts      # 创建新 session（含 memory_level/policy）
-│   ├── execute-prompt.ts      # 发送 prompt（即发即返 + 自动注入）
-│   ├── chat-with-session.ts   # 多轮编排
-│   ├── list-sessions.ts       # 列出所有 session
-│   ├── get-session-info.ts    # 查看 session 详情
-│   ├── read-session-log.ts    # 读取对话日志
-│   ├── list-io-records.ts     # 快速 IO 提取
-│   ├── poll-session.ts        # 结构化状态轮询
-│   ├── run-flow.ts            # 多步流程执行
-│   ├── stream-response.ts     # WebSocket 推送
-│   ├── get-tunnel-status.ts   # 隧道状态
-│   ├── learn-workflow.ts      # 学习工作流
-│   ├── execute-workflow.ts    # 执行工作流模板
-│   ├── list-workflow-templates.ts # 列出模板
-│   ├── continue-workflow.ts   # 工作流决策
-│   ├── session-watch.ts       # watch_session/get_watch_result/continue_watch/set_watch_output
-│   ├── memory-set.ts          # 写入记忆条目
-│   ├── memory-get.ts          # 读取记忆条目
-│   ├── memory-list.ts         # 列出记忆键名
-│   ├── memory-delete.ts       # 删除记忆条目
-│   ├── memory-status.ts       # 记忆库状态
-│   ├── memory-archive.ts      # 归档 session findings
-│   ├── list-policies.ts       # 列出策略
-│   ├── approve-tool.ts        # 放行阻断工具
-│   └── deny-tool.ts           # 拒绝阻断工具
-└── public/
-    ├── console.html           # Web 调试控制台
-    └── workflow-console.html  # PM Dashboard 监管面板（四区：健康/阻断/工作流/Skill）
+├── index.ts                     # 入口：DI 装配，启动 HTTP+MCP，初始化记忆库和编排追踪
+├── types.ts                     # TunnelServices 接口
+├── mcp-server.ts                # MCP stdio 服务器（注册 28 个工具）
+├── http-server.ts               # Express + WebSocket + /api/orchestrations + /api/token
+├── wire-client.ts               # Kimi Server REST + WS 推送 + 心跳探测自动重连
+├── message-queue.ts             # WebSocket pub/sub 广播
+├── orchestration-store.ts       # PM→子 session 编排关系内存追踪
+├── session-store.ts             # 文件系统扫描 + 路径解析
+├── session-log-reader.ts        # wire.jsonl 日志解析 + IO 提取 + sanitizeText
+├── workflow-template.ts         # 模板类型定义 + YAML 解析 + Zod 校验
+├── workflow-store.ts            # 模板持久化（templates/ CRUD）
+├── workflow-engine.ts           # 自适应工作流引擎
+├── policy-types.ts              # 策略类型 + Zod schema + 已知工具清单
+├── policy-builtins.ts           # read-only / safe-edit / full-access
+├── policy-store.ts              # YAML 策略文件 CRUD
+├── policy-engine.ts             # 策略解析/检查/绑定 + BlockEvent 追踪
+├── memory-store.ts              # SQLite 持久化 + buildInjection()
+├── memory-injector.ts           # 注入文本构建（thin wrapper）
+├── tools/                       # 28 个 MCP 工具
+│   ├── create-session.ts        # + 编排追踪
+│   ├── run-flow.ts              # + 编排追踪
+│   ├── execute-workflow.ts      # + 编排追踪
+│   └── ...
+
+shared/                          # 浏览器端共享 JS（ES2020+）
+├── api.js                       # Tunnel + Kimi Server API 客户端
+├── state.js                     # Session 树状态管理
+├── renderer.js                  # DOM 渲染（复用页面原生样式）
+├── injector.js                  # DOM 注入 + token 自动填入
+└── styles.css                   # 最小注入样式
+
+ext/                             # Chrome MV3 扩展
+├── manifest.json                # content_scripts → Kimi Web UI 页面
+├── content.js                   # 扩展入口
+├── service-worker.js
+├── options.html                 # 端口配置页
+├── options.js
+└── icons/
+
+userscript/                      # Tampermonkey 用户脚本源
+└── （构建输出到 dist/userscript/）
+
+scripts/
+└── build-userscript.mjs         # 共享代码内联 → .user.js
 ```
+
+> **v2.7 变更**：`src/public/console.html` 和 `workflow-console.html` 已移除。监控 UI 迁移至浏览器扩展 + JS 脚本插件，直接注入 Kimi Web UI 侧边栏。
 
 ## 共享记忆系统（v2.5+）
 
@@ -295,6 +295,7 @@ PM 操作:                            Task session 首 turn:
 | `specs/002-session-memory-share/` | Session 冷启动记忆共享 [DONE] |
 | `specs/003-permission-policy/` | 权限与策略管理 [DONE] |
 | `specs/004-memory-lazy-inject/` | 记忆注入策略升级——索引+按需自读 [DONE] |
+| `specs/005-web-ui-extension/` | Kimi Web UI 编排监控插件——浏览器扩展+JS脚本双版本 |
 
 ## Linux 部署
 

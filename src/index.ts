@@ -4,6 +4,7 @@ import { MessageQueue } from "./message-queue.js";
 import { WorkflowEngine } from "./workflow-engine.js";
 import { PolicyEngine } from "./policy-engine.js";
 import { MemoryStore } from "./memory-store.js";
+import { OrchestrationStore } from "./orchestration-store.js";
 import type { TunnelServices } from "./types.js";
 import { startMcpServer } from "./mcp-server.js";
 import { startHttpServer } from "./http-server.js";
@@ -41,7 +42,8 @@ async function main(): Promise<void> {
     workflowEngine,
     policyEngine,
     memoryStore,
-    tunnelProjectRoot: projectRoot,  // for cross-project injection (SPEC 002)
+    orchestrationStore: new OrchestrationStore(),
+    tunnelProjectRoot: projectRoot,
   };
 
   // Start HTTP + WebSocket server for external clients

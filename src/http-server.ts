@@ -1,14 +1,9 @@
 import express from "express";
 import { createServer } from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import { readFileSync } from "node:fs";
 import type { TunnelServices } from "./types.js";
 import type { WebSocketClient } from "./message-queue.js";
 import { randomUUID } from "node:crypto";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export function startHttpServer(port: number, services: TunnelServices): void {
   const { wireClient, messageQueue } = services;
@@ -25,30 +20,15 @@ export function startHttpServer(port: number, services: TunnelServices): void {
 
   app.use(express.json());
 
-  // Serve web console
-  const consoleHtmlPath = join(__dirname, "public", "console.html");
-  let consoleHtml: string;
-  try {
-    consoleHtml = readFileSync(consoleHtmlPath, "utf-8");
-  } catch {
-    consoleHtml = "<html><body><h1>Debug Console not found</h1></body></html>";
-  }
-
-  app.get("/", (_req, res) => {
-    res.type("html").send(consoleHtml);
-  });
-
-  // Serve workflow console
-  const workflowConsoleHtmlPath = join(__dirname, "public", "workflow-console.html");
-  let workflowConsoleHtml: string;
-  try {
-    workflowConsoleHtml = readFileSync(workflowConsoleHtmlPath, "utf-8");
-  } catch {
-    workflowConsoleHtml = "<html><body><h1>Workflow Console not found</h1></body></html>";
-  }
-
-  app.get("/workflow-console.html", (_req, res) => {
-    res.type("html").send(workflowConsoleHtml);
+  // CORS: allow cross-origin requests from Kimi Web UI (any localhost port)
+  app.use((_req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    if (_req.method === "OPTIONS") {
+      res.status(204).end();
+      return;
+    }
+    next();
   });
 
   // REST API: execute prompt directly via Wire protocol (push-based)
@@ -110,6 +90,32 @@ export function startHttpServer(port: number, services: TunnelServices): void {
       wireConnected: wireClient.isConnected(),
       version: "2.0.0",
     });
+  });
+
+  // REST API: orchestration relationships (PM → child sessions)
+  app.get("/api/orchestrations", (_req, res) => {
+    if (!wireClient.isConnected()) {
+      res.status(503).json({ error: "Wire client not connected" });
+      return;
+    }
+    const store = services.orchestrationStore;
+    const orchestrations = store ? store.getAll() : [];
+    res.json({ orchestrations });
+  });
+
+  // REST API: get Kimi Server token (localhost only)
+  app.get("/api/token", (req, res) => {
+    const loopback = ["127.0.0.1", "::1", "::ffff:127.0.0.1"];
+    if (!req.ip || !loopback.includes(req.ip)) {
+      res.status(403).json({ error: "Access restricted to localhost" });
+      return;
+    }
+    const token = process.env.KIMI_SERVER_TOKEN;
+    if (!token) {
+      res.status(404).json({ error: "KIMI_SERVER_TOKEN not configured" });
+      return;
+    }
+    res.json({ token });
   });
 
   // WebSocket handling

@@ -7,7 +7,7 @@
     "kimi-session-orchestrator": "dist/index.js"
   },
   "scripts": {
-    "build": "tsc && node -e \"require('fs').mkdirSync('dist/public',{recursive:true})\" && cp -r src/public/* dist/public/",
+    "build": "tsc && node scripts/build-userscript.mjs && node -e \"const{cpSync}=require('fs');cpSync('ext','dist/ext',{recursive:true});cpSync('shared','dist/shared',{recursive:true})\"",
     "start": "node dist/index.js",
     "dev": "tsc --watch",
     "inspector": "npx @modelcontextprotocol/inspector node dist/index.js"

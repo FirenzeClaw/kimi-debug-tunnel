@@ -3,7 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { TunnelServices } from "../types.js";
 
 export function registerCreateSession(server: McpServer, services: TunnelServices): void {
-  const { wireClient } = services;
+  const { wireClient, orchestrationStore } = services;
   server.tool(
     "create_session",
     "创建新的 Kimi Code session。可指定工作目录和权限模式（auto/manual/yolo）。",
@@ -61,6 +61,7 @@ export function registerCreateSession(server: McpServer, services: TunnelService
       }
 
       try {
+        const pmSessionId = wireClient.getSessionId();
         const result = await wireClient.createSession({
           cwd,
           title,
@@ -68,6 +69,11 @@ export function registerCreateSession(server: McpServer, services: TunnelService
           model,
           thinking,
         });
+
+        // Track orchestration relationship (PM → child)
+        if (pmSessionId && orchestrationStore) {
+          orchestrationStore.recordChildCreation(pmSessionId, cwd, result.sessionId, cwd);
+        }
 
         wireClient.setSessionId(result.sessionId);
 

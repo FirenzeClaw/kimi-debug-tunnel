@@ -2,6 +2,7 @@ import type { WireClient } from "./wire-client.js";
 import type { MessageQueue } from "./message-queue.js";
 import type { WorkflowResult, BlockageEvent } from "./workflow-template.js";
 import type { IPolicyEngine } from "./policy-engine.js";
+import type { OrchestrationStore } from "./orchestration-store.js";
 
 export interface WorkflowProgress {
   template: string;
@@ -77,6 +78,7 @@ export interface TunnelServices {
   workflowEngine?: IWorkflowEngine;
   policyEngine?: IPolicyEngine;
   memoryStore?: IMemoryStore;
+  orchestrationStore?: OrchestrationStore;
   /** Tunnel 自身的项目根目录，用于跨项目 session 注入时定位 memory.db */
   tunnelProjectRoot?: string | null;
 }

@@ -39,12 +39,19 @@ export function registerRunFlow(server: McpServer, services: TunnelServices): vo
 
       // Fire-and-forget via WorkflowEngine (use shared engine if available)
       const engine = services.workflowEngine || new WorkflowEngine(wireClient, services.messageQueue);
+      const pmSessionId = wireClient.getSessionId();
       // Ensure memory store is wired for the fallback path (shared engine already has it)
       if (!services.workflowEngine && services.memoryStore) {
         engine.setMemoryStore(services.memoryStore, services.tunnelProjectRoot ?? null);
       }
       engine.execute(template, { autoMode: auto_mode, model, thinking, policy, memory_level, from_session })
-        .then(r => process.stderr.write(`[run-flow] ${r.template} ${r.status}\n`))
+        .then(r => {
+          // Track orchestration relationship (PM → child)
+          if (pmSessionId && r.sessionId && services.orchestrationStore) {
+            services.orchestrationStore.recordChildCreation(pmSessionId, cwd, r.sessionId, cwd);
+          }
+          process.stderr.write(`[run-flow] ${r.template} ${r.status}\n`);
+        })
         .catch(e => process.stderr.write(`[run-flow] error: ${e.message}\n`));
 
       return {

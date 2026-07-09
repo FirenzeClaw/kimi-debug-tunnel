@@ -249,6 +249,7 @@ for m in data.get('items',[]):
 | `docs/issues/memory-cross-project-injection.md` | [FIXED] 跨项目 resolveProjectRoot 静默跳过 → 注入失效 |
 | `docs/issues/ubuntu-wire-client-startup.md` | [FIXED] Ubuntu Wire Client 启动时序——指数退避 + 定时重连；Linux 仍需 `--port 5494` |
 | `specs/004-memory-lazy-inject/` | [DONE] 记忆注入策略升级——全量预载 → 索引+按需自读（minimal/standard/full 三级格式） |
+| `specs/005-web-ui-extension/` | 浏览器扩展+JS脚本双版本——废弃独立HTML监控，注入Kimi Web UI侧边栏 |
 
 ## Agent Skills
 
