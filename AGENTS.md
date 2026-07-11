@@ -261,11 +261,15 @@ for m in data.get('items',[]):
 | `agent-session-monitor` | 通过 wire.jsonl 尾部日志推断 session 运行状态（无需 API 认证） | `skills/agent-session-monitor.md` | `~/.agents/skills/` |
 | `mcp-async-tool` | MCP 异步工具设计模式——解决 >30s 任务被协议超时截断的问题 | `skills/mcp-async-tool.md` | `~/.agents/skills/` |
 | `session-retire` | **PM 专用**——退役 task session + 自动化接班 pipeline：归档记忆 → 提取上下文 → 创建接班 session → 注入 7-block 模板 → 新 session 自举 | `skills/session-retire/SKILL.md` | `~/.kimi-code/skills/` |
+| `xmind-orchestrated` | 困境分析升级版——task session 独立上下文 + 零认知污染过滤器 + 子 Agent 降级 | `skills/xmind-orchestrated/SKILL.md` | `~/.agents/skills/` |
+| `xmind` | 本地子 Agent 困境分析（保留原版）——独立 Agent + zoom-out 宏观视角 | `skills/xmind/SKILL.md` | `~/.agents/skills/` |
 
 **安装**：
 ```bash
 # Agent 级 skill（新 session 自动加载）
 cp -r skills/kimi-session-orchestrator ~/.agents/skills/kimi-session-orchestrator
+cp -r skills/xmind-orchestrated ~/.agents/skills/xmind-orchestrated
+cp -r skills/xmind ~/.agents/skills/xmind
 cp skills/agent-session-monitor.md ~/.agents/skills/agent-session-monitor/SKILL.md
 cp skills/mcp-async-tool.md ~/.agents/skills/mcp-async-tool/SKILL.md
 
