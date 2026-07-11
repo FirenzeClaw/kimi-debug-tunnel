@@ -107,12 +107,12 @@ description: Use when retiring a task session and spawning a successor with full
 请先依次执行以下启动步骤以建立上下文基线：
 
 1. Read <cwd>/AGENTS.md
-2. memory_get("project/meta")
-3. memory_get("project/decisions")
-4. memory_get("project/learnings")
-5. memory_get("session/<retiring_id>/handoff/completed")
-6. memory_get("session/<retiring_id>/handoff/pending")
-7. memory_get("session/<retiring_id>/handoff/decisions")
+2. memory_get(namespace="project/meta")
+3. memory_get(namespace="project/decisions")
+4. memory_get(namespace="project/learnings")
+5. memory_get(namespace="session/<retiring_id>/handoff/completed")
+6. memory_get(namespace="session/<retiring_id>/handoff/pending")
+7. memory_get(namespace="session/<retiring_id>/handoff/decisions")
 
 完成全部 7 步后回复'上下文已建立，共加载 N 条记忆，等待任务'。
 
