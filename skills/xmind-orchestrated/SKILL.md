@@ -130,3 +130,5 @@ Agent(subagent_type="coder", prompt=
 **违反规则的字面意思就是违反规则的精神。**
 
 > 原 xmind skill 保留在 `~/.agents/skills/xmind/`，作为独立使用的备选方案。
+>
+> zoom-out skill 来源：https://github.com/microsoft/SkillOpt，非本项目创建。不可用时本 skill 已内置手动 fallback。
