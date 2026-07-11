@@ -93,7 +93,7 @@ npm start
 
 Tunnel 启动后自动连接 Kimi Server，选择最近 session，初始化记忆库（如 `.kimi-tunnel/` 存在）。
 
-> **端口自动检测**：Tunnel 启动时自动读取 `~/.kimi-code/server/lock` 获取 Kimi Server 实际端口，无需再手动设置 `KIMI_SERVER_URL` 或 `--port`。如需覆盖，仍可通过 `KIMI_SERVER_URL` 环境变量指定。
+> **端口自动检测**：Tunnel 启动时自动读取 `~/.kimi-code/server/lock` 获取 Kimi Server 实际端口。**不要在 `mcp.json` 或环境变量中硬编码 `KIMI_SERVER_URL`**——端口每次启动可能不同，硬编码会导致连接失败。仅在自动检测异常时才显式设置。
 
 ### 注册到 Kimi Code CLI
 
@@ -437,6 +437,14 @@ EOF
 | Kimi Server 端口 | ✅ | 自动从 `~/.kimi-code/server/lock` 检测 |
 
 ## 常见问题 (FAQ)
+
+<details>
+<summary><b>Tunnel 连接失败，日志显示 Connection refused on 5494？</b></summary>
+
+**根因**：`mcp.json` 或环境变量中硬编码了 `KIMI_SERVER_URL=http://127.0.0.1:5494`。Kimi Server 每次启动端口可能不同，硬编码会导致连接被拒。
+
+**解决**：从 `mcp.json` 的 `env` 中**删除** `KIMI_SERVER_URL` 行。Tunnel 自动从 `~/.kimi-code/server/lock` 检测实际端口，无需手动设置。仅在自动检测异常时才需要覆盖。
+</details>
 
 <details>
 <summary><b>为什么 task session 调用 <code>memory_get</code> 失败？</b></summary>
