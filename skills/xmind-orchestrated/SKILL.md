@@ -131,4 +131,4 @@ Agent(subagent_type="coder", prompt=
 
 > 原 xmind skill 保留在 `~/.agents/skills/xmind/`，作为独立使用的备选方案。
 >
-> zoom-out skill 来源：https://github.com/ZhaoLLe/mattpocock-skills，非本项目创建。不可用时本 skill 已内置手动 fallback。
+> zoom-out skill 来源：https://github.com/mattpocock/skills，非本项目创建。不可用时本 skill 已内置手动 fallback。
