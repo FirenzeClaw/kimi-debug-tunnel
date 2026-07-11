@@ -15,11 +15,13 @@ description: 当需要操作 kimi-session-orchestrator MCP 工具时使用
 
 如果当前 session 处于 auto permission mode（系统提示 `Auto permission mode is active`），AskUserQuestion 工具将不可用。
 
-**处理方式**：
-- 用纯文本直接提问，代替 AskUserQuestion
-- 格式：`**Q1: 当前角色与维度？** A: PM 规划派发 / B: PM 长轮次编排 / C: 执行者`
-- 同时提示用户：`（提示：输入 /auto 可退出 auto 模式获得更好的交互体验）`
-- 用户文本回复后继续 Q2、Q3
+- **Auto 模式**：用纯文本提问，同时提示用户 `/auto` 可退出
+  ```
+  **Q1: 角色与维度？**
+  A: PM 规划派发 / B: PM 长轮次编排 / C: 执行者
+  （提示：输入 /auto 退出 auto 模式可获得交互式选项）
+  ```
+- **非 auto 模式**：使用 AskUserQuestion 工具，一次一个问题
 - 禁止调用 ExitPlanMode——它与 auto permission 无关
 
 ### 第一轮：Q1 — 角色与维度
