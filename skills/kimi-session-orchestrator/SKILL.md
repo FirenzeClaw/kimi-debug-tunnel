@@ -111,8 +111,8 @@ description: 当需要操作 kimi-session-orchestrator MCP 工具时使用——
 ```
 [系统注入] 你是任务 session。使用 memory_get 按需读取：
 
-- memory_get("project/meta") — 项目背景（必读）
-- memory_get("project/decisions") — 架构决策（必读）
+- memory_get(namespace="project/meta") — 项目背景（必读）
+- memory_get(namespace="project/decisions") — 架构决策（必读）
 
 （共 12 条可用，已折叠 2 条。用 memory_list 查看全部）
 ```
@@ -184,7 +184,7 @@ description: 当需要操作 kimi-session-orchestrator MCP 工具时使用——
 ```
 ① list_templates → 选模板名
 ② execute_workflow(template_name)
-   → WebSocket 实时推送进度到 workflow-console.html
+   → WebSocket 实时推送进度（浏览器扩展或 ws://localhost:<TUNNEL_PORT>/ws）
 ```
 
 ---

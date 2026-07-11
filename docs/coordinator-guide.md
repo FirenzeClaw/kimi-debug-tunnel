@@ -2,6 +2,7 @@
 
 <!--
 修改记录:
+  2026-07-11 | kimi-code (v2.8) | 修复注入文本歧义：memory_get("ns") → memory_get(namespace="ns")——消除与 memory MCP 服务器的工具名混淆；所有文档示例语法同步修正
   2026-07-09 | kimi-code (v2.7) | 新增 session-retire skill：退役→接班自动化 pipeline（Phase 1→5）；§1.5.4 引用该 skill 作为推荐方案；skills/ 库增至 4 个
   2026-07-08 | kimi-code (v2.6) | 记忆注入策略升级：§1.4 注入格式从全量预载改为索引+按需自读（minimal/standard/full 三级）；角色锚定"你是任务 session"；注入级别表更新；过期条目静默排除；§七 新增 v2.6 版本条目
   2026-07-08 | kimi-code (v2.5) | 共享内存冷启动集成：§1.1 侦察成果复用；§1.4 prompt 注入简化；§1.5.7 三层内存架构 + PM 操作流程；§1.5.4 退役增加 memory_archive 步骤；§二 新增 §2.5 共享内存工具准入矩阵；§七 新增 v2.5 版本条目
@@ -426,14 +427,14 @@ execute_prompt(sid, "审查 src/types.ts 的类型定义")
 # Task session 收到的实际 prompt（索引格式，非全量内容）:
 # [系统注入] 你是任务 session。使用 memory_get 按需读取：
 #
-# - memory_get("project/meta") — 项目背景（必读）
-# - memory_get("project/decisions") — 架构决策（必读）
+# - memory_get(namespace="project/meta") — 项目背景（必读）
+# - memory_get(namespace="project/decisions") — 架构决策（必读）
 # ---
 # 审查 src/types.ts 的类型定义
 
 # session 首 turn：
-#   Step 1: memory_get("project/meta")   ← 自主拉取技术栈/编码规范
-#   Step 2: memory_get("project/decisions") ← 自主拉取架构决策
+#   Step 1: memory_get(namespace="project/meta")   ← 自主拉取技术栈/编码规范
+#   Step 2: memory_get(namespace="project/decisions") ← 自主拉取架构决策
 #   Step 3: Read src/types.ts            ← 开始实际审查
 ```
 
@@ -442,7 +443,7 @@ execute_prompt(sid, "审查 src/types.ts 的类型定义")
 | Level | 注入内容 | PM 操作 |
 |--------|----------|---------|
 | `off` | 无 | 临时 session、探索性任务 |
-| `minimal` | 角色锚定 + "使用 memory_get(project/meta)" | 简单修复 |
+| `minimal` | 角色锚定 + "使用 memory_get(namespace=project/meta)" | 简单修复 |
 | `standard` | 角色锚定 + namespace 列表（meta + decisions，标注必读） | **默认**，代码审查、常规开发 |
 | `full` | 角色锚定 + 完整索引表（4 命名空间，键名 + 建议列；>20条自动折叠） | 复杂重构、新人 session |
 
@@ -763,6 +764,7 @@ memory_status  # 查看知识库全景——条目数、过期数、命名空间
 
 | Tunnel 版本 | 关键变更 |
 |-------------|----------|
+| v2.8 | 修复注入文本歧义：`memory_get("ns")` → `memory_get(namespace="ns")`——消除与 `memory` MCP 服务器的工具名混淆；文档示例语法全面修正 |
 | v2.7 | 新增 `session-retire` skill——退役→接班自动化 pipeline（Phase 1→5：提取→归档→模板→启动→汇报）；coordinator-guide §1.5.4 引用该 skill 作为推荐方案 |
 | v2.6 | 记忆注入策略升级——全量预载 → 索引+按需自读（minimal/standard/full 三级格式）；角色锚定"你是任务 session"；注入文本 ~600B→~200B；>20条自动折叠；task session 首 turn 自读记忆 |
 | v2.5 | 共享内存冷启动——三层知识库（L1项目/L2 Session/L3向量）；6个 memory_* MCP工具；自动注入（create_session/execute_prompt 零成本拼接项目背景）；冷启动 token 节省 83%+ |

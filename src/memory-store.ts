@@ -359,7 +359,7 @@ export class MemoryStore implements IMemoryStore {
 
     if (profile.level === "minimal") {
       // FR-1 minimal: single instruction
-      output = `${rolePrefix} 使用 memory_get("project/meta") 读取项目背景后开始工作。`;
+      output = `${rolePrefix} 使用 memory_get(namespace="project/meta") 读取项目背景后开始工作。`;
     } else if (profile.level === "standard") {
       // FR-1 standard: bullet list
       const lines: string[] = [
@@ -368,7 +368,7 @@ export class MemoryStore implements IMemoryStore {
       ];
       for (const ns of namespaces) {
         if (nsEntries[ns].length === 0) continue;
-        lines.push(`- memory_get("${ns}") — ${nsLabelMap[ns] || ns}（${suggestionMap[ns] || "按需"}）`);
+        lines.push(`- memory_get(namespace="${ns}") — ${nsLabelMap[ns] || ns}（${suggestionMap[ns] || "按需"}）`);
       }
       output = lines.join("\n");
     } else {
@@ -392,7 +392,7 @@ export class MemoryStore implements IMemoryStore {
 
       if (collapse) {
         lines.push("");
-        lines.push(`总计 ${totalEntries} 条，已折叠。使用 memory_get(ns) 读取具体内容。`);
+        lines.push(`总计 ${totalEntries} 条，已折叠。使用 memory_get(namespace=命名空间路径) 读取具体内容。`);
       }
 
       output = lines.join("\n");

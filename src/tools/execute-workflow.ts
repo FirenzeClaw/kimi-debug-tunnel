@@ -120,7 +120,7 @@ export function registerExecuteWorkflow(server: McpServer, services: TunnelServi
                 template: template_name,
                 steps: template.steps.length,
                 auto_mode,
-                hint: `工作流已启动。通过 WebSocket (ws://localhost:${process.env.TUNNEL_PORT || "3456"}/ws) 或 workflow-console.html 查看实时进度。用 poll_session 跟踪任务 session。`,
+                hint: `工作流已启动。通过 WebSocket (ws://localhost:${process.env.TUNNEL_PORT || "3456"}/ws) 查看实时进度。用 poll_session 跟踪任务 session。`,
               },
               null,
               2

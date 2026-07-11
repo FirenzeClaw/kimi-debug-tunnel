@@ -1,5 +1,6 @@
 <!--
 修改记录:
+  2026-07-11 | kimi-code (v2.8) | 修复注入文本歧义：memory_get("ns") → memory_get(namespace="ns")；全文档语法修正 + 过时引用清理（workflow-console.html）；README 重构：TOC + 环境变量表 + FAQ + 贡献指南 + 可见版本历史 + Linux 去重 + "更新工具"章节；Skill 安装 +rm -rf 防嵌套；execute-workflow.ts 移除 workflow-console 引用
   2026-07-10 | kimi-code (fix) | Wire Client 连接鲁棒性 3 项修复：① 新增 detectKimiServerUrl() 从 ~/.kimi-code/server/lock 自动检测 Kimi Server 端口（解决 KIMI_SERVER_URL 未设时默认 5494 与实际端口不匹配的问题）；② WebSocket 重连加指数退避（3s→60s，最多 10 次）+ clearTimeout 防泄漏（解决无限制重连堆积 100+ TCP 连接耗尽系统资源导致 fetch 失败的问题）；③ connect() 错误日志加 baseUrl 诊断 + wire-transport fetch 错误含 cause 详情；④ index.ts/poll-command/execute-workflow 硬编码端口全部变量化；⑤ 项目命名全局统一：kimi-debug-tunnel → kimi-session-orchestrator（mcp.json + docs/ + specs/）；selftest 通过（编译零错误，测试结果 wireConnected=true，create_session 成功）
   2026-07-09 | kimi-code (v2.7) | 新增 session-retire skill：退役→接班自动化 pipeline；skills/ 库 3→4；AGENTS.md/README/coordinator-guide 同步更新
   2026-07-08 | kimi-code (fix) | Ubuntu 部署修复 3 项：① WireClient connect() 3×2s→6级指数退避（1s→32s，最长~63s）+ connecting 并发防护；② 启动失败后调用 startHealthCheck() 持续每10s重连（解决启动时序问题）；③ WorkflowEngine +setMemoryStore，run_flow/execute_workflow 传递 memory_level/from_session（修复 2 个 TODO）；selftest通过（编译零错误，Windows 兼容无回归）
@@ -99,9 +100,6 @@ src/
 │   ├── memory-status.ts     # 查看知识库整体状态
 │   ├── memory-archive.ts    # 归档 session findings 为 learnings
 │   └── get-tunnel-status.ts # Wire 连接状态、客户端数、运行时间
-└── public/
-    ├── console.html          # Web 调试控制台
-    └── workflow-console.html # 工作流实时监管页面（WebSocket 进度推送）
 ```
 <!-- AUTO:END -->
 
@@ -221,7 +219,7 @@ for m in data.get('items',[]):
 
 ③ execute_workflow(template_name, auto_mode=true)
    → 自动创建任务 session，逐步下发指令，自适应调整
-   → WebSocket 实时推送进度到 workflow-console.html
+   → WebSocket 实时推送进度（通过浏览器扩展插件或直接连接 ws://localhost:<TUNNEL_PORT>/ws 查看）
 
 ④ continue_workflow(execution_id, decision="retry")
    → 对阻塞暂停的工作流执行决策
