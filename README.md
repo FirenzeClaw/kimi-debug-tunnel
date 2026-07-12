@@ -189,7 +189,18 @@ cp -r skills/session-retire ~/.kimi-code/skills/session-retire
 
 ### 更新工具
 
-拉取最新代码后，执行以下步骤使更新生效：
+#### ⛔ 更新前检查
+
+更新前确认以下前置条件，避免 `/reload` 后 MCP 连接失败：
+
+| # | 检查项 | 验证方式 |
+|---|--------|----------|
+| 1 | **`kimi web` 运行中** | `curl http://127.0.0.1:<端口>/api/v1/meta`（需 token） |
+| 2 | `KIMI_SERVER_TOKEN` 正确 | 对比 `cat ~/.kimi-code/server/lock` 端口与 `mcp.json` 中的 token |
+
+> `kimi web` 未运行是最常见的更新后连接失败原因——Tunnel 启动时从 lock 文件读取端口，若 Kimi Server 不在线则报 `ECONNREFUSED`。详见 [FAQ](#常见问题-faq)。
+
+#### 更新步骤
 
 ```bash
 git pull
@@ -208,7 +219,11 @@ rm -rf ~/.kimi-code/skills/session-retire
 cp -r skills/session-retire ~/.kimi-code/skills/session-retire
 ```
 
-> **重要**：更新后必须在 Kimi Code CLI 中执行 `/reload` 使 MCP 工具和 skill 变更生效。仅 `git pull` + `npm run build` 不更新 skill 文件时，`/reload` 即可——MCP 工具指向 `dist/index.js`，重新编译后自动生效。
+#### 使更新生效
+
+在 Kimi Code CLI 中执行 `/reload` 使 MCP 工具和 skill 变更生效。
+
+> **原理**：`/reload` 会杀死旧 MCP 进程并重新启动，新进程加载更新后的 `dist/index.js`。仅 `git pull` + `npm run build` 不更新 skill 文件时，`/reload` 即可——编译输出已变更。若端口 3456 被旧孤儿进程占用，`/reload` 通常能清理；残留时手动 `taskkill /PID <pid>` 即可。
 
 ## MCP 工具
 
@@ -549,6 +564,7 @@ npm start
 
 | 日期 | 版本 | 变更 |
 |------|:--:|------|
+| 2026-07-12 | v2.8.1 | "更新工具"章节补全：新增更新前检查（kimi web 运行 + token 校验）+ 孤儿进程清理 + `/reload` 原理说明；本机实测确认 kimi web 未运行是 ECONNREFUSED 最常见根因 |
 | 2026-07-11 | v2.8 | Skill 拆分加载 + xmind-orchestrated（task session 隔离困境分析）+ 注入格式修正 + poll-command 离线检测 + 全文档重构 |
 | 2026-07-09 | v2.7 | 新增 `session-retire` skill：退役→接班自动化 pipeline；PM Dashboard 迁移至浏览器扩展 |
 | 2026-07-08 | v2.6 | 记忆注入策略升级：全量预载 → 索引+按需自读（三级格式）；注入文本 ~600B→~200B |
