@@ -45,14 +45,19 @@ export function registerApproveTool(server: McpServer, services: TunnelServices)
         }
 
         // If we have an approval_id, POST the approval to Kimi Server
+        let apiApproved = false;
         if (approval_id && wireClient.isConnected()) {
           try {
             await wireClient.apiPost(
               `/api/v1/sessions/${sid}/approvals/${approval_id}`,
-              { decision: "approved", scope: scope === "session" ? "session" : "once" }
+              { decision: "approved", scope: "session" }
             );
-          } catch {
-            // Non-fatal: approval may have already been handled
+            apiApproved = true;
+          } catch (err) {
+            return {
+              content: [{ type: "text", text: `Kimi Server 放行失败: ${(err as Error).message}` }],
+              isError: true,
+            };
           }
         }
 
@@ -63,6 +68,7 @@ export function registerApproveTool(server: McpServer, services: TunnelServices)
               text: JSON.stringify(
                 {
                   approved: true,
+                  api_approved: apiApproved,
                   ...(block_id && { block_id }),
                   tool: block?.toolName || "unknown",
                   scope,

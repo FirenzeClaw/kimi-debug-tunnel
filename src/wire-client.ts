@@ -9,14 +9,13 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { writeFileSync, mkdirSync, appendFileSync, readFileSync, unlinkSync } from "node:fs";
+import { writeFileSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { WebSocket } from "ws";
 import { WireTransport } from "./wire-transport.js";
 import type { PolicyEngine } from "./policy-engine.js";
 import type { MessageQueue } from "./message-queue.js";
-import { findSessionPath } from "./session-store.js";
 
 interface KimiContentBlock {
   type: "text" | "thinking" | "tool_use" | "tool_result";
@@ -80,6 +79,7 @@ export class WireClient {
   private baseUrl: string;
   private token: string;
   private sessionId: string;
+  private sessionPermissionMode: string | null = null;
   private connected = false;
 
   // Transport layer (REST calls)
@@ -113,8 +113,6 @@ export class WireClient {
   private messageQueue: MessageQueue | null = null;
   // Memory profiles: stores session → InjectionProfile mapping (SPEC 002)
   private memoryProfiles = new Map<string, { level: string; cwd: string; fromSession?: string; hasExpiredEntries?: boolean }>();
-  // Wire log path cache: resolves sessionId → wire.jsonl path for audit logging
-  private wireLogCache = new Map<string, string>();
 
   constructor(sessionId?: string) {
     this.baseUrl =
@@ -213,6 +211,7 @@ export class WireClient {
 
     // Update internal sessionId so subsequent API calls target this session
     this.sessionId = resp.id;
+    this.sessionPermissionMode = options.permissionMode || null;
 
     return { sessionId: resp.id, title: resp.title };
   }
@@ -420,16 +419,6 @@ export class WireClient {
           const resolver = resolvers[0];
           if (resolver) resolver.resolve("awaiting_approval");
         }
-
-        // If a manual session with a policy bound enters awaiting_approval,
-        // run approveAll to apply policy rules — this produces block events
-        // that SessionWatcher can detect and the PM can act on.
-        if (status === "awaiting_approval" && this.policyEngine) {
-          const activePolicy = this.policyEngine.getActivePolicy(sessionId);
-          if (activePolicy) {
-            this.approveAll(sessionId).catch(() => {});
-          }
-        }
       }
     }
 
@@ -540,20 +529,7 @@ export class WireClient {
         resolvers.push({
           resolve: (status: string) => {
             clearTimeout(timer);
-            if (status === "awaiting_approval" && autoApprove) {
-              // Approve and continue waiting
-              this.approveAll(sessionId).then(() => {
-                // Re-register to wait for idle
-                const more = this.statusResolvers.get(sessionId) || [];
-                more.push({
-                  resolve: (s: string) => { clearTimeout(timer); resolve(s); },
-                  reject: (e: Error) => { clearTimeout(timer); reject(e); },
-                });
-                this.statusResolvers.set(sessionId, more);
-              }).catch(() => resolve(status));
-            } else {
-              resolve(status);
-            }
+            resolve(status);
           },
           reject: (err: Error) => {
             clearTimeout(timer);
@@ -576,9 +552,6 @@ export class WireClient {
         if (status === targetStatus || status === "unknown" || status === "aborted") {
           resolve(status);
           return;
-        }
-        if (status === "awaiting_approval" && autoApprove) {
-          await this.approveAll(sessionId);
         }
         setTimeout(poll, 1000);
       };
@@ -629,7 +602,7 @@ export class WireClient {
     const body: Record<string, unknown> = {
       content: [{ type: "text", text: prompt }],
     };
-    if (autoApprove) {
+    if (autoApprove || this.sessionPermissionMode === "auto") {
       body.permission_mode = "auto";
     }
 
@@ -665,17 +638,10 @@ export class WireClient {
     const preStatus = await this.waitForStatus(this.sessionId, "idle", Math.min(timeoutMs, 60000), autoApprove);
 
     if (preStatus === "awaiting_approval") {
-      if (!autoApprove) {
         throw new Error(
           `Session ${this.sessionId} is awaiting approval. ` +
-          `Enable auto_mode or approve manually before sending a new prompt.`
+          `Approve or deny manually before sending a new prompt.`
         );
-      }
-      await this.approveAll(this.sessionId);
-      const afterApprove = await this.waitForStatus(this.sessionId, "idle", 10000, autoApprove);
-      if (afterApprove === "running") {
-        throw new Error(`Session is still busy after approval.`);
-      }
     }
 
     // Subscribe to events
@@ -774,65 +740,6 @@ export class WireClient {
     return cached?.status || null;
   }
 
-  async approveAll(sessionId: string): Promise<void> {
-    try {
-      const approvalsResp = await this.transport.apiGet<{
-        items: Array<{ approval_id: string; tool_name?: string; description?: string }>;
-      }>(`/api/v1/sessions/${sessionId}/approvals?status=pending`);
-
-      const items = approvalsResp.items || [];
-      const policy = this.policyEngine?.getActivePolicy(sessionId) ?? null;
-
-      if (!policy) {
-        process.stderr.write(`[wire-client] approveAll: no policy for ${sessionId}, nothing to do\n`);
-        return;
-      }
-
-      for (const item of items) {
-        // Extract tool name from approval payload (or fallback to description)
-        const toolName = item.tool_name || extractToolFromDescription(item.description || "");
-
-        if (policy && toolName) {
-          const decision = this.policyEngine!.check(policy, toolName);
-
-          if (decision.action === "deny") {
-            // Policy blocks this tool — deny the approval
-            await this.transport.apiPost(
-              `/api/v1/sessions/${sessionId}/approvals/${item.approval_id}`,
-              { decision: "rejected", reason: decision.message || `Policy "${policy.name}" blocks ${toolName}` }
-            );
-            process.stderr.write(
-              `[wire-client] Policy DENIED: ${toolName} — ${decision.ruleName || "(default)"} (session ${sessionId})\n`
-            );
-            // Broadcast block event to PM Dashboard via WebSocket
-            this.broadcastBlockEvent(sessionId, policy.name, decision.ruleName || "(default)", toolName, decision.message || "", "deny", item.approval_id);
-            continue;
-          }
-
-          if (decision.action === "require_approval") {
-            // Requires PM intervention — leave pending, broadcast event
-            process.stderr.write(
-              `[wire-client] Policy REQUIRE_APPROVAL: ${toolName} — ${decision.ruleName} (session ${sessionId})\n`
-            );
-            this.broadcastBlockEvent(sessionId, policy.name, decision.ruleName || "(default)", toolName, decision.message || "", "require_approval", item.approval_id);
-            continue;
-          }
-        }
-
-        // Default: approve (policy allows, or no policy bound)
-        await this.transport.apiPost(
-          `/api/v1/sessions/${sessionId}/approvals/${item.approval_id}`,
-          { decision: "approved", scope: "session" }
-        );
-        process.stderr.write(
-          `[wire-client] Auto-approved ${item.approval_id} (${toolName || "unknown tool"}) — session scope\n`
-        );
-      }
-    } catch (err) {
-      // Ignore approval errors
-    }
-  }
-
   // ═══════════════════════════════════════════════════════════════════════════════
   // Health check — detect silent server crashes and reconnect
   // ═══════════════════════════════════════════════════════════════════════════════
@@ -908,87 +815,6 @@ export class WireClient {
   // REST helpers (delegated to WireTransport)
   // ═══════════════════════════════════════════════════════════════════════════════
 
-  /**
-   * Broadcast a policy block event to all connected WebSocket clients (PM Dashboard).
-   */
-  private broadcastBlockEvent(
-    sessionId: string,
-    policyName: string,
-    ruleName: string,
-    toolName: string,
-    message: string,
-    action: "deny" | "require_approval",
-    approvalId?: string
-  ): void {
-    if (!this.messageQueue) return;
-
-    const blockId = randomUUID().slice(0, 8);
-    const event = {
-      type: "policy.block",
-      payload: {
-        blockId,
-        sessionId,
-        policyName,
-        ruleName,
-        toolName,
-        message,
-        action,
-        timestamp: new Date().toISOString(),
-        ...(approvalId && { approvalId }),
-      },
-    };
-
-    this.messageQueue.broadcastJson(event);
-
-    // Also record in policy engine for approve/deny tool tracking
-    if (this.policyEngine) {
-      this.policyEngine.recordBlock({
-        id: blockId,
-        sessionId,
-        toolName,
-        policyName,
-        ruleName,
-        action,
-        message,
-        timestamp: new Date().toISOString(),
-        resolved: false,
-        resolution: null,
-        ...(approvalId && { approvalId }),
-      });
-    }
-
-    // Write block event to wire.jsonl for audit trail
-    const logEntry = JSON.stringify({
-      type: "policy.block",
-      sessionId,
-      toolName,
-      policy: policyName,
-      rule: ruleName,
-      action,
-      timestamp: new Date().toISOString(),
-    });
-    this.appendToWireLog(sessionId, logEntry);
-  }
-
-  private appendToWireLog(sessionId: string, entry: string): void {
-    const cached = this.wireLogCache.get(sessionId);
-    if (cached) {
-      try { appendFileSync(cached, entry + "\n", "utf-8"); return; } catch { /* fall through to stderr */ }
-    }
-
-    findSessionPath(sessionId)
-      .then((sessionDir) => {
-        if (sessionDir) {
-          const wirePath = sessionDir.replace(/[/\\]?$/, "") + "/wire.jsonl";
-          this.wireLogCache.set(sessionId, wirePath);
-          try { appendFileSync(wirePath, entry + "\n", "utf-8"); } catch { /* best-effort */ }
-        }
-      })
-      .catch(() => {});
-
-    process.stderr.write(`[policy-block] ${entry}\n`);
-  }
-
   // REST helpers (delegated to WireTransport)
   // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1051,22 +877,3 @@ export function detectKimiServerUrl(): string {
   return "http://127.0.0.1:5494";
 }
 
-/** Extract tool name from approval description text (fallback when tool_name field is absent).
- *  Handles various Kimi Server description formats:
- *    "Tool: Read" | "工具: Bash" | "Use Write to..." |
- *    "调用 Edit" | "Bash command" | "Run Bash" */
-function extractToolFromDescription(desc: string): string {
-  // Pattern 1: explicit "Tool:" or "工具:" prefix
-  let match = desc.match(/(?:Tool|工具)[\s:]*(\w[\w-]*)/i);
-  if (match) return match[1];
-
-  // Pattern 2: "using ToolName" or "调用 ToolName"
-  match = desc.match(/(?:using|调用|执行|运行)\s+["']?(\w[\w-]*)["']?/i);
-  if (match) return match[1];
-
-  // Pattern 3: standalone capitalized word matching known tool pattern (Read/Write/Bash/Edit/Grep/Glob)
-  match = desc.match(/\b(Read|Write|Edit|Bash|Grep|Glob|Agent|AgentSwarm|TaskStop|TaskList|TaskOutput|WebSearch|FetchURL)\b/);
-  if (match) return match[1];
-
-  return "";
-}

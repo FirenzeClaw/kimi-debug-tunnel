@@ -155,10 +155,6 @@ export class SessionWatcher {
         // Check WS cache first (zero I/O), fall back to REST
         const cached = this.wireClient.getCachedStatus(entry.sessionId);
         if (cached === "idle" || cached === "aborted" || cached === "awaiting_approval") {
-          // If awaiting approval and session has a policy, run approveAll to create blocks
-          if (cached === "awaiting_approval") {
-            await this.wireClient.approveAll(entry.sessionId).catch(() => {});
-          }
           await this.resolveWatch(watchId, entry);
           continue;
         }
@@ -170,10 +166,6 @@ export class SessionWatcher {
         this.wireClient.setSessionId(originalSession);
 
         if (status === "idle" || status === "aborted" || status === "awaiting_approval") {
-          // If awaiting approval and session has a policy, run approveAll to create blocks
-          if (status === "awaiting_approval") {
-            await this.wireClient.approveAll(entry.sessionId).catch(() => {});
-          }
           await this.resolveWatch(watchId, entry);
         }
       } catch {
