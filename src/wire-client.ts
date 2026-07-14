@@ -9,7 +9,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { writeFileSync, mkdirSync, appendFileSync, readFileSync } from "node:fs";
+import { writeFileSync, mkdirSync, appendFileSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { WebSocket } from "ws";
@@ -227,6 +227,20 @@ export class WireClient {
     this.connecting = true;
 
     try {
+      // Re-detect URL on each connect() call — stale lock may have been cleaned
+      // and a new kimi web instance may have started on a different port since.
+      if (!this.connected) {
+        const freshUrl = detectKimiServerUrl();
+        if (freshUrl !== this.baseUrl) {
+          process.stderr.write(
+            `[wire-client] Kimi Server URL changed: ${this.baseUrl} → ${freshUrl}\n`
+          );
+          this.baseUrl = freshUrl;
+          this.wsUrl = this.baseUrl.replace(/^http/, "ws") + "/api/v1/ws";
+          this.transport.baseUrl = freshUrl;
+        }
+      }
+
       // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s — up to ~63s total
       const delays = [1000, 2000, 4000, 8000, 16000, 32000];
 
@@ -974,17 +988,48 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Auto-detect Kimi Server URL from the lock file. */
+/** Check if a process with the given PID is currently alive (cross-platform). */
+function isProcessAlive(pid: number): boolean {
+  try {
+    // signal 0 is a no-op that checks existence; throws if PID not found
+    process.kill(pid, 0);
+    return true;
+  } catch (e: unknown) {
+    const err = e as NodeJS.ErrnoException;
+    return err.code !== "ESRCH";
+  }
+}
+
+/** Auto-detect Kimi Server URL from the lock file.
+ *  Validates that the lock PID is still alive; if stale, cleans the lock
+ *  and logs a diagnostic so users know to restart kimi web. */
 export function detectKimiServerUrl(): string {
   try {
     const lockPath = join(homedir(), ".kimi-code", "server", "lock");
     const raw = readFileSync(lockPath, "utf-8");
-    const info = JSON.parse(raw) as { host: string; port: number };
+    const info = JSON.parse(raw) as { host: string; port: number; pid?: number; started_at?: string };
+
+    // ── Stale lock detection ──────────────────────────────────────────
+    if (info.pid && !isProcessAlive(info.pid)) {
+      const age = info.started_at
+        ? ` (started ${info.started_at})`
+        : "";
+      process.stderr.write(
+        `[wire-client] Stale lock detected: PID ${info.pid} is no longer running${age}.\n` +
+        `  The Kimi Server may have crashed or been killed — its lock file was left behind.\n` +
+        `  Auto-cleaning stale lock and falling back to default port.\n` +
+        `  Run "kimi web --no-open" to start the server, then /reload.\n`
+      );
+      try { unlinkSync(lockPath); } catch { /* best-effort cleanup */ }
+      return "http://127.0.0.1:5494";
+    }
+    // ──────────────────────────────────────────────────────────────────
+
     if (info.host && info.port) {
       return `http://${info.host}:${info.port}`;
     }
   } catch {
-    // lock file not found or unreadable
+    // lock file not found or unreadable — normal when no server is running
   }
   return "http://127.0.0.1:5494";
 }

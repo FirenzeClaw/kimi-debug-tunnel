@@ -490,13 +490,14 @@ EOF
 <details>
 <summary><b>Kimi Server 崩溃/重启后 Tunnel 如何处理？</b></summary>
 
-Tunnel 内置四层离线防御，无需人工干预：
+Tunnel 内置五层离线防御，无需人工干预：
 
 | 机制 | 行为 |
 |------|------|
-| **心跳探测** | 每 10 秒 ping Kimi Server `/api/v1/meta` |
+| **过期 lock 自动清理** | 启动时检测 lock 文件 PID 是否存活——已死则自动删 lock + 打印诊断（含 PID/启动时间/修复命令），避免 `kimi web` 和 Tunnel 双重失败 |
+| **心率探测** | 每 10 秒 ping Kimi Server `/api/v1/meta` |
 | **断连判定** | 连续 3 次心跳失败 → 标记 `connected=false` |
-| **REST 自动重连** | 断连后立即尝试重连，指数退避 1s→32s（6 次），之后每 10s 持续重试 |
+| **REST 自动重连** | 断连后立即尝试重连，指数退避 1s→32s（6 次），之后每 10s 持续重试。**每次重连前重新检测 lock 端口**——过期 lock 已自动清理，新 `kimi web` 的端口会被自动感知 |
 | **WebSocket 独立重连** | WS 断开后独立退避 3s→60s（最多 10 次），耗尽后降级为 REST 轮询 |
 
 **PM 侧表现**：
@@ -564,6 +565,7 @@ npm start
 
 | 日期 | 版本 | 变更 |
 |------|:--:|------|
+| 2026-07-14 | v2.8.2 | `detectKimiServerUrl()` 过期 lock 自动清理——PID 活性检测 + 自动删 lock + `connect()` 重连前 URL 重新检测 |
 | 2026-07-12 | v2.8.1 | "更新工具"章节补全：新增更新前检查（kimi web 运行 + token 校验）+ 孤儿进程清理 + `/reload` 原理说明；本机实测确认 kimi web 未运行是 ECONNREFUSED 最常见根因 |
 | 2026-07-11 | v2.8 | Skill 拆分加载 + xmind-orchestrated（task session 隔离困境分析）+ 注入格式修正 + poll-command 离线检测 + 全文档重构 |
 | 2026-07-09 | v2.7 | 新增 `session-retire` skill：退役→接班自动化 pipeline；PM Dashboard 迁移至浏览器扩展 |

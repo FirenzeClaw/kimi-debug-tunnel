@@ -1,5 +1,6 @@
 <!--
 修改记录:
+  2026-07-14 | kimi-code (fix) | Wire Client 过期 lock 自动清理：① detectKimiServerUrl() 新增 isProcessAlive() PID 活性检测——lock PID 已死则自动删 lock + 打印诊断（含 PID/启动时间/修复命令）+ 回退默认端口；② connect() 每次重连前重新检测 URL（detectKimiServerUrl）——解决自动清理后 Tunnel 无法感知新端口的问题；selftest通过（编译零错误）
   2026-07-12 | kimi-code (docs) | README"更新工具"章节补全：新增"更新前检查"（kimi web 运行状态 + token 校验）+ 孤儿进程清理说明；本机实测确认 kimi web 未运行是 `/reload` 后 ECONNREFUSED 最常见根因
   2026-07-11 | kimi-code (v2.8) | Skill 拆分加载 + xmind-orchestrated + 注入格式全面修正：SKILL.md 222→64行；新增 3 个 guide 按维度加载 + xmind-orchestrated（task session 隔离困境分析）+ xmind 内化；session-retire 注入修正；coordinator-guide 保留 docs/；token 节省 65-94%；poll-command 三层离线防御
   2026-07-10 | kimi-code (fix) | Wire Client 连接鲁棒性 3 项修复：① 新增 detectKimiServerUrl() 从 ~/.kimi-code/server/lock 自动检测 Kimi Server 端口（解决 KIMI_SERVER_URL 未设时默认 5494 与实际端口不匹配的问题）；② WebSocket 重连加指数退避（3s→60s，最多 10 次）+ clearTimeout 防泄漏（解决无限制重连堆积 100+ TCP 连接耗尽系统资源导致 fetch 失败的问题）；③ connect() 错误日志加 baseUrl 诊断 + wire-transport fetch 错误含 cause 详情；④ index.ts/poll-command/execute-workflow 硬编码端口全部变量化；⑤ 项目命名全局统一：kimi-debug-tunnel → kimi-session-orchestrator（mcp.json + docs/ + specs/）；selftest 通过（编译零错误，测试结果 wireConnected=true，create_session 成功）
