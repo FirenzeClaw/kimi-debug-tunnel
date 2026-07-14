@@ -151,7 +151,7 @@ PM 拆解 → create_session → execute_prompt("执行 X，完成后用 selftes
 
 ④ 等待 <notification> → 读取 output.log → 拿到回复
 
-> poll_command 已自动生成，包含跨平台 python 自检测和离线超时保护。直接传给 Bash，不要修改。
+> ⛔ **poll_command 必须原样使用，禁止手写改写。** `execute_prompt` 返回的 `poll_command` 已正确格式化——Python `-c` 使用真正的多行字符串。**手写时若在 bash 双引号内用 `\n` 代替换行，`\n` 不会被展开**，Python 收到非法 token 触发 `SyntaxError`，被 `2>/dev/null` 静默吞掉 → 输出永远为空。直接传给 Bash，一字不改。
 
 ---
 ## 八、状态含义

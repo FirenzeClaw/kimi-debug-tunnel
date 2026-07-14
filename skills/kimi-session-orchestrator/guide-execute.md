@@ -17,7 +17,7 @@
 ④ 等待通知 → 读取 output.log → 拿到回复
 ```
 
-> poll_command 已自动生成，直接传给 Bash，不要修改。
+> ⛔ **poll_command 必须原样使用，禁止手写改写。** `execute_prompt` 返回的 `poll_command` 已正确格式化——Python `-c` 使用真正的多行字符串。**手写时若在 bash 双引号内用 `\n` 代替换行，`\n` 不会被展开**，Python 收到非法 token 触发 `SyntaxError`，被 `2>/dev/null` 静默吞掉 → 输出永远为空。直接传给 Bash，一字不改。
 
 ## 核心铁律
 
@@ -50,7 +50,7 @@
 - "我手动轮询几次看看" → 启动后台 Bash 任务
 - "这次简单，阻塞等也没事" → MCP 超时 30s，必截断
 - "用 wait=true 更方便" → 已废弃，始终即发即返
-- "直接把 poll_command 改一下" → 不要修改，工具已生成正确命令
+- "直接把 poll_command 改一下" → 手写时 bash 双引号 `\n` 不展开 → Python SyntaxError → `2>/dev/null` 静默吞错 → 输出永远为空。不要修改，工具已生成正确命令
 
 > 关键约束（不重复 poll、一 bash 一 session、auto_mode 规则等）见 SKILL.md。
 > 完整规范见 docs/coordinator-guide.md
