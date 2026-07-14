@@ -1,0 +1,32 @@
+# Workflow Template: code-review
+# Version: 1.0
+# Generated: 2026-07-14T12:08:07.420Z
+
+name: "code-review"
+version: "1.0"
+projectCwd: "D:/code/kimi-session-orchestrator/demo"
+description: "1. 阅读 docs/user-service-spec.md 了解规范\n2. 逐函数对比 src/user-service.ts 实现与规范的一致性\n3. 列出所有不一致之处，标注严重度\n4. 按严重度排序输出审查报告"
+specDocs: []
+
+steps:
+  - id: "step-1"
+    instruction: "阅读 docs/user-service-spec.md 了解规范"
+  - id: "step-2"
+    instruction: "逐函数对比 src/user-service.ts 实现与规范的一致性"
+  - id: "step-3"
+    instruction: "列出所有不一致之处，标注严重度"
+  - id: "step-4"
+    instruction: "按严重度排序输出审查报告"
+
+blockagePolicy:
+  autoResolve:
+    - dependency_missing
+    - file_not_found
+  maxRetriesPerStep: 1
+
+timeout:
+  perStep: 600000
+  total: 3600000
+
+createdAt: "2026-07-14T12:08:07.420Z"
+updatedAt: "2026-07-14T12:08:07.420Z"

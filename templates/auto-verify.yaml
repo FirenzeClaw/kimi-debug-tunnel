@@ -1,0 +1,33 @@
+# Workflow Template: auto-verify
+# Version: 1.0
+# Generated: 2026-07-14T12:08:07.423Z
+
+name: "auto-verify"
+version: "1.0"
+projectCwd: "D:/code/kimi-session-orchestrator/demo"
+description: "Learned from description"
+specDocs: []
+
+steps:
+  - id: "test"
+    instruction: "运行 npm test 或 node --import tsx --test tests/*.test.ts"
+    expectedOutcome: "所有测试通过"
+  - id: "lint"
+    instruction: "用 tsc --noEmit 检查类型错误"
+    expectedOutcome: "零类型错误"
+  - id: "report"
+    instruction: "汇总测试和类型检查结果，生成验证报告"
+    expectedOutcome: "含通过/失败/警告三段的报告"
+
+blockagePolicy:
+  autoResolve:
+    - dependency_missing
+    - file_not_found
+  maxRetriesPerStep: 1
+
+timeout:
+  perStep: 600000
+  total: 3600000
+
+createdAt: "2026-07-14T12:08:07.423Z"
+updatedAt: "2026-07-14T12:08:07.423Z"

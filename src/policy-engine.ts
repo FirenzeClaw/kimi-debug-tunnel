@@ -34,6 +34,8 @@ export interface IPolicyEngine {
   getPendingBlocks(): BlockEvent[];
   /** Resolve a block event. */
   resolveBlock(blockId: string, resolution: "approved" | "denied"): BlockEvent | null;
+  /** Get unresolved block events for a specific session. */
+  getBlocksBySession(sessionId: string): BlockEvent[];
 }
 
 // ── Implementation ──────────────────────────────────────────────────────────────
@@ -174,6 +176,12 @@ export class PolicyEngine implements IPolicyEngine {
 
   getPendingBlocks(): BlockEvent[] {
     return Array.from(this.blocks.values()).filter((b) => !b.resolved);
+  }
+
+  getBlocksBySession(sessionId: string): BlockEvent[] {
+    return Array.from(this.blocks.values()).filter(
+      (b) => b.sessionId === sessionId && !b.resolved
+    );
   }
 
   resolveBlock(blockId: string, resolution: "approved" | "denied"): BlockEvent | null {

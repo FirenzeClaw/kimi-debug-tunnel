@@ -12,7 +12,8 @@ export function registerApproveTool(server: McpServer, services: TunnelServices)
     "approve_tool",
     "放行被策略阻断的工具调用（仅 PM 使用）。scope=once 仅放行本次调用，scope=session 将工具加入 session 临时白名单。",
     {
-      block_id: z.string().describe("阻断事件 ID。从 PM Dashboard 阻断面板获取"),
+      block_id: z.string().optional()
+        .describe("阻断事件 ID。从 poll_session 或 watch_result 的 blocks 中获取。"),
       scope: z
         .enum(["once", "session"])
         .default("once")
@@ -21,23 +22,26 @@ export function registerApproveTool(server: McpServer, services: TunnelServices)
       approval_id: z.string().optional().describe("Kimi Server 审批 ID（高级用法）"),
     },
     async ({ block_id, scope, session_id, approval_id }) => {
-      if (!policyEngine) {
-        return { content: [{ type: "text", text: "策略引擎未初始化" }], isError: true };
+      // Resolve block event if available (may be null after tunnel reload)
+      let sid = session_id;
+      let block: { toolName: string; sessionId: string } | null = null;
+      if (block_id && policyEngine) {
+        block = policyEngine.resolveBlock(block_id, "approved");
+        if (block) {
+          sid = sid || block.sessionId;
+        }
+      }
+
+      if (!sid) {
+        return { content: [{ type: "text", text: "缺少 session_id：请提供 session_id 或有效的 block_id" }], isError: true };
       }
 
       try {
-        // Resolve the block event
-        const block = policyEngine.resolveBlock(block_id, "approved");
-        if (!block) {
-          return { content: [{ type: "text", text: `阻断事件未找到: ${block_id}` }], isError: true };
-        }
 
-        const sid = session_id || block.sessionId;
-
-        // If scope=session, add the tool to a temporary whitelist for this session
-        if (scope === "session" && sid) {
-          process.stderr.write(`[approve-tool] Session scope whitelist: ${block.toolName} for ${sid}\n`);
-          // (whitelist logic lives in policy-engine; for MVP we approve the specific call)
+        // If scope=session, unbind the policy entirely
+        if (scope === "session" && policyEngine) {
+          policyEngine.unbind(sid);
+          process.stderr.write(`[approve-tool] Policy unbound for session ${sid}\n`);
         }
 
         // If we have an approval_id, POST the approval to Kimi Server
@@ -59,8 +63,8 @@ export function registerApproveTool(server: McpServer, services: TunnelServices)
               text: JSON.stringify(
                 {
                   approved: true,
-                  block_id,
-                  tool: block.toolName,
+                  ...(block_id && { block_id }),
+                  tool: block?.toolName || "unknown",
                   scope,
                   session_id: sid,
                 },

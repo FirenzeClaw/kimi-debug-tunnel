@@ -80,6 +80,8 @@ export interface BlockEvent {
   timestamp: string;
   resolved: boolean;
   resolution: "approved" | "denied" | null;
+  /** Kimi Server approval ID — used by PM to POST override via approve_tool. */
+  approvalId?: string;
 }
 
 // ── Known kimi-code tool names ──────────────────────────────────────────────────

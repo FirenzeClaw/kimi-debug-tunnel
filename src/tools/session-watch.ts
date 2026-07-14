@@ -7,7 +7,7 @@ let watcher: SessionWatcher | null = null;
 
 function getWatcher(services: TunnelServices): SessionWatcher {
   if (!watcher) {
-    watcher = new SessionWatcher(services.wireClient);
+    watcher = new SessionWatcher(services.wireClient, services.policyEngine);
   }
   return watcher;
 }
@@ -62,6 +62,7 @@ export function registerGetWatchResult(server: McpServer, services: TunnelServic
             status: result.status,
             result: result.result,
             error: result.error,
+            ...(result.blocks && result.blocks.length > 0 && { blocks: result.blocks }),
           }, null, 2),
         }],
       };
@@ -96,6 +97,7 @@ export function registerContinueWatch(server: McpServer, services: TunnelService
       };
       if (result.next_watch_id) resp.next_watch_id = result.next_watch_id;
       if (result.error) resp.error = result.error;
+      if (result.blocks && result.blocks.length > 0) resp.blocks = result.blocks;
 
       return {
         content: [{

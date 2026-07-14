@@ -1,10 +1,12 @@
 import type { WireClient } from "./wire-client.js";
+import type { IPolicyEngine } from "./policy-engine.js";
 
 interface WatchEntry {
   sessionId: string;
   status: "watching" | "done" | "error";
   result: string | null;
   error: string | null;
+  blocks: Array<{ block_id: string; approval_id?: string; tool_name: string; action: string; message: string }> | null;
   createdAt: number;
   resolvedAt: number | null;
 }
@@ -17,10 +19,12 @@ interface WatchEntry {
 export class SessionWatcher {
   private watches = new Map<string, WatchEntry>();
   private wireClient: WireClient;
+  private policyEngine: IPolicyEngine | undefined;
   private pollInterval: ReturnType<typeof setInterval> | null = null;
 
-  constructor(wireClient: WireClient) {
+  constructor(wireClient: WireClient, policyEngine?: IPolicyEngine) {
     this.wireClient = wireClient;
+    this.policyEngine = policyEngine;
   }
 
   /**
@@ -35,6 +39,7 @@ export class SessionWatcher {
       status: "watching",
       result: null,
       error: null,
+      blocks: null,
       createdAt: Date.now(),
       resolvedAt: null,
     });
@@ -49,11 +54,11 @@ export class SessionWatcher {
   /**
    * Get the result of a watch. Returns null if still watching.
    */
-  getResult(watchId: string): { status: string; result: string | null; error: string | null } | null {
+  getResult(watchId: string): { status: string; result: string | null; error: string | null; blocks: WatchEntry["blocks"] } | null {
     const entry = this.watches.get(watchId);
     if (!entry) return null;
     if (entry.status === "watching") return null;
-    return { status: entry.status, result: entry.result, error: entry.error };
+    return { status: entry.status, result: entry.result, error: entry.error, blocks: entry.blocks };
   }
 
   /**
@@ -73,10 +78,14 @@ export class SessionWatcher {
     result?: string | null;
     next_watch_id?: string;
     error?: string | null;
+    blocks?: WatchEntry["blocks"];
   } | null> {
     const entry = this.watches.get(watchId);
     if (!entry) return { ready: false, error: "watch not found" };
     if (entry.status === "watching") return null; // not ready yet
+
+    // Capture blocks before cleanup
+    const blocks = entry.blocks;
 
     // Clean up the completed watch
     this.watches.delete(watchId);
@@ -85,6 +94,7 @@ export class SessionWatcher {
       ready: true,
       result: entry.result,
       error: entry.error,
+      ...(blocks && blocks.length > 0 && { blocks } as any),
     };
 
     // Auto-submit next instruction and start watching (now properly sequenced)
@@ -144,7 +154,11 @@ export class SessionWatcher {
       try {
         // Check WS cache first (zero I/O), fall back to REST
         const cached = this.wireClient.getCachedStatus(entry.sessionId);
-        if (cached === "idle" || cached === "aborted") {
+        if (cached === "idle" || cached === "aborted" || cached === "awaiting_approval") {
+          // If awaiting approval and session has a policy, run approveAll to create blocks
+          if (cached === "awaiting_approval") {
+            await this.wireClient.approveAll(entry.sessionId).catch(() => {});
+          }
           await this.resolveWatch(watchId, entry);
           continue;
         }
@@ -155,7 +169,11 @@ export class SessionWatcher {
         const status = await this.wireClient.getSessionStatus();
         this.wireClient.setSessionId(originalSession);
 
-        if (status === "idle" || status === "aborted") {
+        if (status === "idle" || status === "aborted" || status === "awaiting_approval") {
+          // If awaiting approval and session has a policy, run approveAll to create blocks
+          if (status === "awaiting_approval") {
+            await this.wireClient.approveAll(entry.sessionId).catch(() => {});
+          }
           await this.resolveWatch(watchId, entry);
         }
       } catch {
@@ -166,6 +184,20 @@ export class SessionWatcher {
 
   private async resolveWatch(watchId: string, entry: WatchEntry): Promise<void> {
     try {
+      // Check for pending blocks before fetching messages
+      if (this.policyEngine) {
+        const rawBlocks = this.policyEngine.getBlocksBySession(entry.sessionId);
+        if (rawBlocks.length > 0) {
+          entry.blocks = rawBlocks.map(b => ({
+            block_id: b.id,
+            approval_id: b.approvalId,
+            tool_name: b.toolName,
+            action: b.action,
+            message: b.message,
+          }));
+        }
+      }
+
       // Fetch the last assistant response
       const originalSession = this.wireClient.getSessionId();
       this.wireClient.setSessionId(entry.sessionId);

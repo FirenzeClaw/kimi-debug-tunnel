@@ -420,6 +420,16 @@ export class WireClient {
           const resolver = resolvers[0];
           if (resolver) resolver.resolve("awaiting_approval");
         }
+
+        // If a manual session with a policy bound enters awaiting_approval,
+        // run approveAll to apply policy rules — this produces block events
+        // that SessionWatcher can detect and the PM can act on.
+        if (status === "awaiting_approval" && this.policyEngine) {
+          const activePolicy = this.policyEngine.getActivePolicy(sessionId);
+          if (activePolicy) {
+            this.approveAll(sessionId).catch(() => {});
+          }
+        }
       }
     }
 
@@ -679,7 +689,6 @@ export class WireClient {
       content: KimiContentBlock[];
     }>(`/api/v1/sessions/${this.sessionId}/prompts`, {
       content: [{ type: "text", text: prompt }],
-      ...(autoApprove && { permission_mode: "auto" }),
     });
 
     const promptId = submitResp.prompt_id;
@@ -765,7 +774,7 @@ export class WireClient {
     return cached?.status || null;
   }
 
-  private async approveAll(sessionId: string): Promise<void> {
+  async approveAll(sessionId: string): Promise<void> {
     try {
       const approvalsResp = await this.transport.apiGet<{
         items: Array<{ approval_id: string; tool_name?: string; description?: string }>;
@@ -773,6 +782,11 @@ export class WireClient {
 
       const items = approvalsResp.items || [];
       const policy = this.policyEngine?.getActivePolicy(sessionId) ?? null;
+
+      if (!policy) {
+        process.stderr.write(`[wire-client] approveAll: no policy for ${sessionId}, nothing to do\n`);
+        return;
+      }
 
       for (const item of items) {
         // Extract tool name from approval payload (or fallback to description)
@@ -791,7 +805,7 @@ export class WireClient {
               `[wire-client] Policy DENIED: ${toolName} — ${decision.ruleName || "(default)"} (session ${sessionId})\n`
             );
             // Broadcast block event to PM Dashboard via WebSocket
-            this.broadcastBlockEvent(sessionId, policy.name, decision.ruleName || "(default)", toolName, decision.message || "", "deny");
+            this.broadcastBlockEvent(sessionId, policy.name, decision.ruleName || "(default)", toolName, decision.message || "", "deny", item.approval_id);
             continue;
           }
 
@@ -800,7 +814,7 @@ export class WireClient {
             process.stderr.write(
               `[wire-client] Policy REQUIRE_APPROVAL: ${toolName} — ${decision.ruleName} (session ${sessionId})\n`
             );
-            this.broadcastBlockEvent(sessionId, policy.name, decision.ruleName || "(default)", toolName, decision.message || "", "require_approval");
+            this.broadcastBlockEvent(sessionId, policy.name, decision.ruleName || "(default)", toolName, decision.message || "", "require_approval", item.approval_id);
             continue;
           }
         }
@@ -814,7 +828,7 @@ export class WireClient {
           `[wire-client] Auto-approved ${item.approval_id} (${toolName || "unknown tool"}) — session scope\n`
         );
       }
-    } catch {
+    } catch (err) {
       // Ignore approval errors
     }
   }
@@ -903,7 +917,8 @@ export class WireClient {
     ruleName: string,
     toolName: string,
     message: string,
-    action: "deny" | "require_approval"
+    action: "deny" | "require_approval",
+    approvalId?: string
   ): void {
     if (!this.messageQueue) return;
 
@@ -919,6 +934,7 @@ export class WireClient {
         message,
         action,
         timestamp: new Date().toISOString(),
+        ...(approvalId && { approvalId }),
       },
     };
 
@@ -937,6 +953,7 @@ export class WireClient {
         timestamp: new Date().toISOString(),
         resolved: false,
         resolution: null,
+        ...(approvalId && { approvalId }),
       });
     }
 

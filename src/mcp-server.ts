@@ -21,6 +21,7 @@ import { registerWatchSession, registerGetWatchResult, registerContinueWatch, re
 import { registerListPolicies } from "./tools/list-policies.js";
 import { registerApproveTool } from "./tools/approve-tool.js";
 import { registerDenyTool } from "./tools/deny-tool.js";
+import { registerListBlocks } from "./tools/list-blocks.js";
 import { registerMemorySet } from "./tools/memory-set.js";
 import { registerMemoryGet } from "./tools/memory-get.js";
 import { registerMemoryList } from "./tools/memory-list.js";
@@ -63,6 +64,7 @@ export async function startMcpServer(services: TunnelServices): Promise<void> {
   registerListPolicies(server, services);
   registerApproveTool(server, services);
   registerDenyTool(server, services);
+  registerListBlocks(server, services);
 
   // Memory & knowledge sharing tools (SPEC 002)
   registerMemorySet(server, services);
