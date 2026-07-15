@@ -1,5 +1,6 @@
 <!--
 修改记录（最近 — 完整历史见 README.md §版本历史）:
+  2026-07-15 | kimi-code (v2.11) | 架构深化第2轮：IWireClient → ISessionClient/IStatusClient/IPushClient 三接口拆分（20法→7/2/8）；消除 ambient sessionId 并发竞态（submitPrompt/sendPrompt/getSessionStatus 改为参数传递，8个save/restore块删除）；apiGet/apiPost → getSessionMessages/resolveApproval 语义方法；记忆注入 extract → tools/helpers.ts（injectMemoryIntoPrompt + setMemoryProfileWithExpiry，消除2处副本）；移除 WorkflowEngine || 回退分支（TunnelServices.workflowEngine 非可选）；tools/manifest.ts 桶文件；session-log-reader 共享 parseWireJsonl 解析流
   2026-07-15 | kimi-code (v2.10) | 架构深化：WireClient 上帝类拆分 → IWireClient 接口 + server-lock.ts；删除 memory-injector.ts（13行死代码）；新增 tools/helpers.ts（preparePrompt + ensureConnected 消除 4×重复样板）；记忆 profile 从 WireClient 移至 MemoryStore；WorkflowEngine/SessionWatcher 改用 IWireClient；workflow-store 手写 toYaml → js-yaml dump；/api/send 死端点移除
   2026-07-15 | kimi-code (docs) | README 全面核查：v2.9.0→v2.9.1 badge、4→6 skill 数量、28→29 工具数、Loop 场景行、参考文档表补 2 issue、新增 FAQ、wire 重连说明更新
   2026-07-15 | kimi-code (arch) | MCP stdio 优先启动：startMcpServer 移到 wireClient.connect 之前，connect 改为后台异步——修复 Kimi Server 离线时 MCP 进程假死（connect 阻塞 63s→stdio 未就绪→tools/list 超时）
@@ -36,7 +37,7 @@
 ```
 src/
 ├── index.ts                 # 入口：创建 TunnelServices，启动 HTTP+MCP 双服务器
-├── types.ts                 # TunnelServices / IWireClient / IMemoryStore / IWorkflowEngine 接口
+├── types.ts                 # ISessionClient / IStatusClient / IPushClient / IMemoryStore / IWorkflowEngine 接口 + TunnelServices
 ├── mcp-server.ts            # MCP stdio 服务器，注册全部 29 个工具
 ├── http-server.ts           # Express + WebSocket 装配入口（薄层）
 ├── wire-client.ts           # Kimi Server REST + WS 推送客户端（实现 IWireClient 接口，v2.10 拆分）
@@ -54,7 +55,8 @@ src/
 ├── server-lock.ts           # Kimi Server 端口自动检测 + stale lock 清理（v2.10：从 wire-client 提取）
 ├── poll-command.ts           # Bash 轮询脚本生成（curl + Python urllib fetch）
 ├── tools/
-│   ├── helpers.ts            # 共享工具辅助函数（v2.10：preparePrompt + ensureConnected）
+│   ├── helpers.ts            # 共享工具辅助函数（v2.10：preparePrompt + ensureConnected, v2.11：injectMemoryIntoPrompt + setMemoryProfileWithExpiry）
+│   ├── manifest.ts            # 工具注册桶文件 — 统一导入点（v2.11）
 │   ├── execute-prompt.ts    # 发送 prompt 并等待完整回复
 │   ├── create-session.ts    # 通过 REST API 创建新 session
 │   ├── chat-with-session.ts # 全自动多轮编排
@@ -125,9 +127,9 @@ npm run inspector    # MCP Inspector 调试模式
 入口层:    index.ts（创建服务容器、装配、启动）
 传输层:    http-server.ts, mcp-server.ts
 工具层:    tools/*（MCP 工具注册 + helpers.ts 共享辅助）
-业务层:    wire-client.ts, session-orchestrator.ts, workflow-engine.ts, session-watcher.ts（v2.10：均依赖 IWireClient 接口）
+业务层:    wire-client.ts, session-orchestrator.ts, workflow-engine.ts, session-watcher.ts（v2.11：ISessionClient/IStatusClient/IPushClient 三接口拆分）
 数据层:    message-queue.ts, workflow-template.ts, workflow-store.ts, session-log-reader.ts, memory-store.ts, server-lock.ts, poll-command.ts, orchestration-store.ts
-类型层:    types.ts（TunnelServices / IWireClient / IMemoryStore / IWorkflowEngine 接口）
+类型层:    types.ts（ISessionClient / IStatusClient / IPushClient / IMemoryStore / IWorkflowEngine 接口 + TunnelServices）
 ```
 <!-- AUTO:END -->
 
