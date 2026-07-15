@@ -1,5 +1,6 @@
 <!--
 修改记录（最近 — 完整历史见 README.md §版本历史）:
+  2026-07-15 | kimi-code (v2.10) | 架构深化：WireClient 上帝类拆分 → IWireClient 接口 + server-lock.ts；删除 memory-injector.ts（13行死代码）；新增 tools/helpers.ts（preparePrompt + ensureConnected 消除 4×重复样板）；记忆 profile 从 WireClient 移至 MemoryStore；WorkflowEngine/SessionWatcher 改用 IWireClient；workflow-store 手写 toYaml → js-yaml dump；/api/send 死端点移除
   2026-07-15 | kimi-code (docs) | README 全面核查：v2.9.0→v2.9.1 badge、4→6 skill 数量、28→29 工具数、Loop 场景行、参考文档表补 2 issue、新增 FAQ、wire 重连说明更新
   2026-07-15 | kimi-code (arch) | MCP stdio 优先启动：startMcpServer 移到 wireClient.connect 之前，connect 改为后台异步——修复 Kimi Server 离线时 MCP 进程假死（connect 阻塞 63s→stdio 未就绪→tools/list 超时）
   2026-07-15 | kimi-code (v2.9) | Loop Engineering 验证闭环：Q1 A入口 + 7分层guide + grade_step LLM评分工具 + loop指纹检测（workflow-engine自动blockage）；export KimiContentBlock；BlockageTypeEnum 追加 loop_detected
@@ -35,10 +36,10 @@
 ```
 src/
 ├── index.ts                 # 入口：创建 TunnelServices，启动 HTTP+MCP 双服务器
-├── types.ts                 # TunnelServices 接口（wireClient, messageQueue, startTime, workflowEngine）
+├── types.ts                 # TunnelServices / IWireClient / IMemoryStore / IWorkflowEngine 接口
 ├── mcp-server.ts            # MCP stdio 服务器，注册全部 29 个工具
 ├── http-server.ts           # Express + WebSocket 装配入口（薄层）
-├── wire-client.ts           # Kimi Server REST + WS 推送客户端（状态缓存）
+├── wire-client.ts           # Kimi Server REST + WS 推送客户端（实现 IWireClient 接口，v2.10 拆分）
 ├── message-queue.ts         # WebSocket 客户端注册 + pub/sub 广播（简化为 67 行）
 ├── session-orchestrator.ts  # 多轮任务编排引擎（不再被 chat_with_session 使用）
 ├── workflow-template.ts     # 工作流模板类型定义 + YAML解析 + 校验
@@ -49,9 +50,11 @@ src/
 ├── policy-builtins.ts       # 3个内置策略（read-only/safe-edit/full-access）
 ├── policy-store.ts          # YAML策略文件CRUD（.kimi-tunnel/policies/）+ 校验
 ├── policy-engine.ts         # 策略引擎：解析/检查/绑定/阻断消息
-├── memory-store.ts          # SQLite 共享内存 CRUD — set/get/list/delete/status/archive（SPEC 002）
-├── memory-injector.ts       # 内存注入文本拼接：根据 profile 构建 Markdown 前缀（SPEC 002）
+├── memory-store.ts          # SQLite 共享内存 CRUD + buildInjection() + 记忆profiles（v2.10：set/getMemoryProfile 移入）
+├── server-lock.ts           # Kimi Server 端口自动检测 + stale lock 清理（v2.10：从 wire-client 提取）
+├── poll-command.ts           # Bash 轮询脚本生成（curl + Python urllib fetch）
 ├── tools/
+│   ├── helpers.ts            # 共享工具辅助函数（v2.10：preparePrompt + ensureConnected）
 │   ├── execute-prompt.ts    # 发送 prompt 并等待完整回复
 │   ├── create-session.ts    # 通过 REST API 创建新 session
 │   ├── chat-with-session.ts # 全自动多轮编排
@@ -121,10 +124,10 @@ npm run inspector    # MCP Inspector 调试模式
 ```
 入口层:    index.ts（创建服务容器、装配、启动）
 传输层:    http-server.ts, mcp-server.ts
-工具层:    tools/*（MCP 工具注册）
-业务层:    wire-client.ts, session-orchestrator.ts, workflow-engine.ts, session-watcher.ts
-数据层:    message-queue.ts, workflow-template.ts, workflow-store.ts, session-log-reader.ts
-类型层:    types.ts
+工具层:    tools/*（MCP 工具注册 + helpers.ts 共享辅助）
+业务层:    wire-client.ts, session-orchestrator.ts, workflow-engine.ts, session-watcher.ts（v2.10：均依赖 IWireClient 接口）
+数据层:    message-queue.ts, workflow-template.ts, workflow-store.ts, session-log-reader.ts, memory-store.ts, server-lock.ts, poll-command.ts, orchestration-store.ts
+类型层:    types.ts（TunnelServices / IWireClient / IMemoryStore / IWorkflowEngine 接口）
 ```
 <!-- AUTO:END -->
 
@@ -263,7 +266,7 @@ manual session 的工具调用由 PM 手动决策，流程：
 
 ## Agent Skills
 
-本项目配套 4 个 skill，安装后自动生效：
+本项目配套 6 个 skill，安装后自动生效：
 
 | Skill | 用途 | 文件 | 安装位置 |
 |-------|------|------|---------|

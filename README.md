@@ -354,7 +354,7 @@ curl -X POST http://localhost:${TUNNEL_PORT:-3456}/api/execute \
 ```
 src/
 ├── index.ts                     # 入口：DI 装配，启动 HTTP+MCP，初始化记忆库和编排追踪
-├── types.ts                     # TunnelServices 接口
+├── types.ts                     # TunnelServices / IWireClient / IMemoryStore / IWorkflowEngine 接口
 ├── mcp-server.ts                # MCP stdio 服务器（注册 29 个工具）
 ├── http-server.ts               # Express + WebSocket + /api/orchestrations + /api/token
 ├── wire-client.ts               # Kimi Server REST + WS 推送 + 心跳探测自动重连
@@ -408,6 +408,8 @@ skills/                          # 配套 Skill（6 个）
 ```
 
 > **v2.7 变更**：`src/public/console.html` 和 `workflow-console.html` 已移除。监控 UI 迁移至浏览器扩展 + JS 脚本插件，直接注入 Kimi Web UI 侧边栏。新增 `session-retire` skill——退役→接班自动化 pipeline（memory_archive + 7-block 模板 + 新 session 启动自举协议）。
+>
+> **v2.10 变更**：架构深化——WireClient 上帝类拆分，新增 IWireClient 接口 + `server-lock.ts`；删除 `memory-injector.ts`（死代码）；新增 `tools/helpers.ts`（preparePrompt + ensureConnected，消除 4 处重复样板）；记忆 profile 从 WireClient 移至 MemoryStore；WorkflowEngine/SessionWatcher 改用 IWireClient；`workflow-store.ts` 手写 toYaml → js-yaml dump；移除 `/api/send` 死端点。
 >
 > **v2.8.5 修复**：`buildInjection()` 空守卫在 project 知识库为空时过早返回，截断 `fromSession` handoff 注入——`session-retire` 交接数据被静默丢弃。修复：handoff 提前收集 + 联合判空 + handoff-only 分支 + 去重。
 >
