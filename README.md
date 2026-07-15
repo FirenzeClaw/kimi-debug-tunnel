@@ -6,11 +6,13 @@
 [![Version](https://img.shields.io/badge/version-v2.9.0-brightgreen)]()
 [![Node](https://img.shields.io/badge/node-%E2%89%A5%2022-339933)]()
 [![MCP Tools](https://img.shields.io/badge/MCP%20tools-29-orange)]()
+[![Loop Engineering](https://img.shields.io/badge/Loop%20Engineering-L2%20%E9%AA%8C%E8%AF%81%E9%97%AD%E7%8E%AF-blueviolet)]()
 
-Kimi Code CLI 的 PM 视角多 session 编排系统——28 个 MCP 工具，支持自适应工作流引擎 + 三层共享内存 + 权限策略管理。
+Kimi Code CLI 的 **Loop Engineering** PM 视角多 session 编排系统——不手动 prompt Agent，而是设计自动 prompt Agent 的循环系统。29 个 MCP 工具，支持 L2 验证闭环（`grade_step` LLM 自动评分 + loop 指纹检测）+ 自适应工作流引擎 + 三层共享内存 + 权限策略管理。
 
 ## 目录
 
+- [Loop Engineering](#loop-engineering-v29)
 - [架构](#架构)
 - [⛔ Agent自动部署必读](#-部署必读)
 - [快速开始](#快速开始)
@@ -61,6 +63,29 @@ Kimi Code CLI 的 PM 视角多 session 编排系统——28 个 MCP 工具，支
 │   POST /api/v1/sessions/... │
 └─────────────────────────────┘
 ```
+
+## Loop Engineering（v2.9）
+
+核心理念：**不手动 prompt Agent，而是设计自动 prompt Agent 的循环系统。**
+
+```
+PM Q1 选 A: Loop Engineering
+  ├── 实施循环: create → execute → poll → grade_step 验证 → 决策
+  └── 验收循环: 已有产出 → grade_step 逐条对照 → 不合格→修复→重验
+                    ├── 单 session 串行
+                    └── 多 session 并行
+```
+
+| 能力 | 工具/机制 |
+|------|----------|
+| **LLM 自动评分** | `grade_step(session_id, criteria, focus?)` → `{pass, score, feedback}` |
+| **Loop 指纹检测** | workflow-engine 自动检测重复 tool pattern → `loop_detected` blockage |
+| **7 层分层 Guide** | entry → implement/verify → single/parallel，按需加载，节约 56-60% token |
+| **Grader 定位** | 筛子非裁判——pass 通过不代表完美，fail 不一定是真问题 |
+
+启动：Skill 加载 → Q1 选 A → Q2 实施/验收 → Q3 单/并行 → 读 ~40 行终端 guide → 执行。
+
+---
 
 ## ⛔ Agent自动部署必读
 
