@@ -11,6 +11,7 @@ import type {
   WorkflowExecution,
   ExecutionStatus,
 } from "./workflow-template.js";
+import type { KimiContentBlock } from "./wire-client.js";
 
 // ── Ambiguity Detection ─────────────────────────────────────────────────────────
 
@@ -108,6 +109,8 @@ interface ActiveExecution {
   currentStepIndex: number;
   stepResults: StepResult[];
   status: ExecutionStatus;
+  /** Loop fingerprint detection: tracks tool call patterns across retries */
+  lastFingerprints: Set<string>;
   autoMode: boolean;
   onProgress?: (progress: WorkflowProgress) => void;
 }
@@ -118,6 +121,10 @@ export class WorkflowEngine {
   private activeExecutions = new Map<string, ActiveExecution>();
   private memoryStore: IMemoryStore | null = null;
   private tunnelProjectRoot: string | null = null;
+
+  // Loop fingerprint detection state
+  private _fingerprintCache = new Map<string, Set<string>>();
+  private _repeatCount = new Map<string, number>();
 
   constructor(wireClient: WireClient, messageQueue: MessageQueue) {
     this.wireClient = wireClient;
@@ -270,6 +277,7 @@ export class WorkflowEngine {
               currentStepIndex: i,
               stepResults,
               status: "awaiting_user",
+              lastFingerprints: new Set<string>(),
               autoMode,
               onProgress,
             });
@@ -386,6 +394,44 @@ export class WorkflowEngine {
           timeoutMs: template.timeout.perStep,
           autoApprove: autoMode,
         });
+
+        // ── Loop fingerprint detection ──
+        const currentFingerprints = new Set(
+          response.messages
+            .filter((b: KimiContentBlock) => b.type === "tool_use" && b.tool_name)
+            .map((b: KimiContentBlock) => `${b.tool_name}:${JSON.stringify(b.input || {}).slice(0, 80)}`)
+        );
+
+        // Track fingerprints per execution, keyed by sessionId:stepId
+        const fpKey = `${sessionId}:${step.id}`;
+        const prevFingerprints = this._fingerprintCache.get(fpKey);
+        if (prevFingerprints && currentFingerprints.size > 0) {
+          const repeated = [...currentFingerprints].every(f => prevFingerprints.has(f)) &&
+                           [...prevFingerprints].every(f => currentFingerprints.has(f));
+          if (repeated) {
+            const count = (this._repeatCount.get(fpKey) || 0) + 1;
+            this._repeatCount.set(fpKey, count);
+            if (count >= 3) {
+              blockages.push({
+                type: "loop_detected",
+                context: `同一工具调用模式已重复 ${count} 次: ${[...currentFingerprints].join(", ")}`,
+                resolved: false,
+                resolution: "",
+                needsUserDecision: true,
+              });
+              this._repeatCount.delete(fpKey);
+              this._fingerprintCache.delete(fpKey);
+              return {
+                stepId: step.id, stepIndex, instruction: step.instruction,
+                response: lastResponse, thinkingSummary,
+                status: "blocked", adjustment: "", blockages,
+              };
+            }
+          } else {
+            this._repeatCount.set(fpKey, 0);
+          }
+        }
+        this._fingerprintCache.set(fpKey, currentFingerprints);
 
         lastResponse = response.finalText.trim();
         thinkingSummary = response.thinkingText
@@ -756,7 +802,8 @@ export class WorkflowEngine {
             this.activeExecutions.set(executionId, {
               executionId, template, sessionId,
               currentStepIndex: i, stepResults,
-              status: "awaiting_user", autoMode, onProgress,
+              status: "awaiting_user", lastFingerprints: new Set<string>(),
+              autoMode, onProgress,
             });
             break;
           }
