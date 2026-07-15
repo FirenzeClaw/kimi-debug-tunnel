@@ -1,5 +1,6 @@
 <!--
 修改记录（最近 — 完整历史见 README.md §版本历史）:
+  2026-07-15 | kimi-code (v2.9) | Loop Engineering 验证闭环：Q1 A入口 + 7分层guide + grade_step LLM评分工具 + loop指纹检测（workflow-engine自动blockage）；export KimiContentBlock；BlockageTypeEnum 追加 loop_detected
   2026-07-14 | kimi-code (arch) | 移除 approveAll 自动审批引擎：manual session 审批→Bash回调→PM手动决策；auto session 继承 permission_mode 零审批；deny_tool 重写支持 approval_id；approve_tool scope=session 修复
   2026-07-14 | kimi-code (fix) | poll_command fetch_result 彻底修复：curl 管道截断 → Python urllib 直连 HTTP；移除 2>/dev/null 静默吞错；Windows GBK emoji 乱码 → PYTHONIOENCODING=utf-8
   2026-07-14 | kimi-code (docs) | 背景轮询 fetch_result 脚本陷阱：bash 双引号 \n 不展开 + Python -c 语法错误 + 2>/dev/null 静默吞错 → 始终用 poll_command 自动生成版
@@ -33,7 +34,7 @@
 src/
 ├── index.ts                 # 入口：创建 TunnelServices，启动 HTTP+MCP 双服务器
 ├── types.ts                 # TunnelServices 接口（wireClient, messageQueue, startTime, workflowEngine）
-├── mcp-server.ts            # MCP stdio 服务器，注册全部 28 个工具
+├── mcp-server.ts            # MCP stdio 服务器，注册全部 29 个工具
 ├── http-server.ts           # Express + WebSocket 装配入口（薄层）
 ├── wire-client.ts           # Kimi Server REST + WS 推送客户端（状态缓存）
 ├── message-queue.ts         # WebSocket 客户端注册 + pub/sub 广播（简化为 67 行）
@@ -73,6 +74,7 @@ src/
 │   ├── memory-delete.ts     # 删除共享内存条目
 │   ├── memory-status.ts     # 查看知识库整体状态
 │   ├── memory-archive.ts    # 归档 session findings 为 learnings
+│   ├── grade-step.ts         # Loop Engineering: LLM 自动评分验证（v2.9）
 │   └── get-tunnel-status.ts # Wire 连接状态、客户端数、运行时间
 ```
 <!-- AUTO:END -->
@@ -261,7 +263,7 @@ manual session 的工具调用由 PM 手动决策，流程：
 
 | Skill | 用途 | 文件 | 安装位置 |
 |-------|------|------|---------|
-| `kimi-session-orchestrator` | MCP 工具完整使用规范——按角色维度（规划派发/长轮次编排/执行者）加载对应指南。启动时 auto 检测 + 三问，按需 Read 对应 guide 文档以节省 token | `skills/kimi-session-orchestrator/SKILL.md` | `~/.agents/skills/` |
+| `kimi-session-orchestrator` | MCP 工具完整使用规范——按角色维度（Loop Engineering/规划派发/长轮次编排/执行者）加载对应指南（10 guide 分层）。启动时 auto 检测 + Q1→Q3 分叉，按需 Read 对应 guide 文档以节省 token | `skills/kimi-session-orchestrator/SKILL.md` | `~/.agents/skills/` |
 | `agent-session-monitor` | 通过 wire.jsonl 尾部日志推断 session 运行状态（无需 API 认证） | `skills/agent-session-monitor.md` | `~/.agents/skills/` |
 | `mcp-async-tool` | MCP 异步工具设计模式——解决 >30s 任务被协议超时截断的问题 | `skills/mcp-async-tool.md` | `~/.agents/skills/` |
 | `session-retire` | **PM 专用**——退役 task session + 自动化接班 pipeline：归档记忆 → 提取上下文 → 创建接班 session → 注入 7-block 模板 → 新 session 自举 | `skills/session-retire/SKILL.md` | `~/.kimi-code/skills/` |
