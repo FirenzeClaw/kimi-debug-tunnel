@@ -1,0 +1,11 @@
+{
+  "name": "loop-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Loop Engineering 实施/验收测试项目 — 空壳源码 + spec 驱动 task session 实现",
+  "scripts": {
+    "test": "node --experimental-vm-modules --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  }
+}
