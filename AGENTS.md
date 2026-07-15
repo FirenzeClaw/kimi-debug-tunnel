@@ -1,6 +1,6 @@
 <!--
 修改记录（最近 — 完整历史见 README.md §版本历史）:
-  2026-07-15 | kimi-code (fix) | grade_step 修复：① listIORecords 拉取目标 session 产出再评分（修复 grader 无数据评分 bug）；② JSON 截断容错——catch 分支正则 fallback 提取 pass/score（修复 grader 反馈过长→score=0 误报）
+  2026-07-15 | kimi-code (docs) | README 全面核查：v2.9.0→v2.9.1 badge、4→6 skill 数量、28→29 工具数、Loop 场景行、参考文档表补 2 issue、新增 FAQ、wire 重连说明更新
   2026-07-15 | kimi-code (arch) | MCP stdio 优先启动：startMcpServer 移到 wireClient.connect 之前，connect 改为后台异步——修复 Kimi Server 离线时 MCP 进程假死（connect 阻塞 63s→stdio 未就绪→tools/list 超时）
   2026-07-15 | kimi-code (v2.9) | Loop Engineering 验证闭环：Q1 A入口 + 7分层guide + grade_step LLM评分工具 + loop指纹检测（workflow-engine自动blockage）；export KimiContentBlock；BlockageTypeEnum 追加 loop_detected
   2026-07-14 | kimi-code (arch) | 移除 approveAll 自动审批引擎：manual session 审批→Bash回调→PM手动决策；auto session 继承 permission_mode 零审批；deny_tool 重写支持 approval_id；approve_tool scope=session 修复
