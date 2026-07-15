@@ -15,11 +15,13 @@
 ## 依赖图
 
 ```
+src/wire-client.ts (export KimiContentBlock)
+       │
 src/workflow-template.ts           src/tools/grade-step.ts
     (enum +1)                            (新工具)
        │                                     │
        └──── src/workflow-engine.ts ─────────┘
-            (指纹检测 +20行)            │
+            (指纹检测, 引用 KimiContentBlock)  │
                    │                    │
                    └── src/mcp-server.ts ──┘
                        (注册 +4行)
@@ -28,7 +30,7 @@ src/workflow-template.ts           src/tools/grade-step.ts
                        (7 个新文件, ~310行)
                             │
                     skills/.../SKILL.md
-                       (Q1 重排 + Q2/Q3 逻辑 +12行)
+                       (Q1 重排 + Q2/Q3 逻辑 + 旧Q2b修正)
                             │
                        README.md
                     (安装命令追加)
@@ -38,6 +40,7 @@ src/workflow-template.ts           src/tools/grade-step.ts
 
 ### 阶段 1：代码基础设施
 
+- [ ] **任务 0：wire-client.ts 导出 KimiContentBlock**
 - [ ] **任务 1：BlockageTypeEnum 扩展**
 - [ ] **任务 2：grade_step MCP 工具**
 - [ ] **任务 3：Loop 指纹检测**
@@ -79,6 +82,43 @@ src/workflow-template.ts           src/tools/grade-step.ts
 ---
 
 ## 任务详情
+
+### 任务 0：wire-client.ts 导出 KimiContentBlock
+
+**文件：**
+- 修改：`src/wire-client.ts:20`
+
+- [ ] **步骤 1：export 接口**
+
+```typescript
+// 20行附近，interface → export interface
+export interface KimiContentBlock {
+  type: "text" | "thinking" | "tool_use" | "tool_result";
+  text?: string;
+  thinking?: string;
+  tool_call_id?: string;
+  tool_name?: string;
+  input?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+```
+
+- [ ] **步骤 2：构建验证**
+
+运行：`npm run build`
+预期：零错误
+
+- [ ] **步骤 3：Commit**
+
+```bash
+git add src/wire-client.ts
+git commit -m "refactor: export KimiContentBlock — loop 指纹检测需要"
+```
+
+**依赖：** 无
+**预估规模：** XS（1 文件，+1 字 `export`）
+
+---
 
 ### 任务 1：BlockageTypeEnum 扩展
 
@@ -128,6 +168,9 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { TunnelServices } from "../types.js";
 
+// 懒创建的 grader session ID，进程级复用
+let _graderSessionId: string | null = null;
+
 export function registerGradeStep(server: McpServer, services: TunnelServices): void {
   const { wireClient } = services;
 
@@ -148,10 +191,10 @@ export function registerGradeStep(server: McpServer, services: TunnelServices): 
       }
 
       const prevSessionId = wireClient.getSessionId();
-      const focusHint = focus ? `评分侧重: ${focus}。` : "";
+      const focusHint = focus ? `评分侧重维度: ${focus}。` : "";
 
-      const gradingPrompt = `你是产出质量评分助手。根据以下验收标准，评估最近一轮 task session 的产出是否合格。
-严格仅返回 JSON，不含任何其他文字：{"pass":true|false,"score":0-100,"feedback":"具体原因"}
+      const gradingPrompt = `你是独立产出质量评分助手。请阅读最近一轮 task session 的产出，根据以下验收标准评估质量。
+严格仅返回 JSON，不含任何其他文字：{"pass":true|false,"score":0-100,"feedback":"具体原因，点明通过/不通过的具体证据"}
 
 验收标准：
 ${criteria}
@@ -160,8 +203,21 @@ ${focusHint}
 请根据 session ${session_id} 的最新产出进行评分。`;
 
       try {
-        wireClient.setSessionId(session_id);
-        const response = await wireClient.sendPrompt(gradingPrompt, { timeoutMs: 30000 });
+        // 懒创建 grader session（独立 session，不污染 task session）
+        if (!_graderSessionId) {
+          const created = await wireClient.createSession({
+            cwd: process.cwd(),
+            title: "[grader] Loop Engineering 评分器",
+            permissionMode: "auto",
+          });
+          _graderSessionId = created.sessionId;
+        }
+
+        // 切到 grader session 评分
+        wireClient.setSessionId(_graderSessionId);
+        const response = await wireClient.sendPrompt(gradingPrompt, { timeoutMs: 30000, autoApprove: true });
+
+        // 切回原 session
         wireClient.setSessionId(prevSessionId);
 
         try {
@@ -184,7 +240,7 @@ ${focusHint}
               text: JSON.stringify({
                 pass: false,
                 score: 0,
-                feedback: "grader 解析失败，原始响应: " + response.finalText.slice(0, 200),
+                feedback: "grader JSON 解析失败，原始响应: " + response.finalText.slice(0, 200),
                 session_id,
               }, null, 2),
             }],
@@ -241,9 +297,14 @@ interface ActiveExecution {
 lastFingerprints: new Set<string>(),
 ```
 
-- [ ] **步骤 3：driveStep() 中加指纹检测**
+- [ ] **步骤 2：driveStep() 中加 import + 指纹检测逻辑**
 
-在 `driveStep()` 收到 response 后（约 line 385）、blockage 检测之前，插入指纹比对逻辑：
+在 `workflow-engine.ts` 顶部加 import：
+```typescript
+import type { KimiContentBlock } from "./wire-client.js";
+```
+
+在 `driveStep()` 收到 response 后（约 line 388）、blockage 检测之前，插入指纹比对逻辑：
 
 ```typescript
 // ── Loop fingerprint detection ──
@@ -307,8 +368,8 @@ git add src/workflow-engine.ts
 git commit -m "feat: loop 指纹检测 — 工具调用模式重复 3 次自动 blockage"
 ```
 
-**依赖：** 任务 1（BlockageTypeEnum 有 `loop_detected`）
-**预估规模：** S（1 文件，~40 行新增）
+**依赖：** 任务 0（导出 `KimiContentBlock`）+ 任务 1（`BlockageTypeEnum` 含 `loop_detected`）
+**预估规模：** S（1 文件，~45 行新增）
 
 ---
 
@@ -355,9 +416,30 @@ git commit -m "feat: 注册 grade_step 到 MCP server"
 每个 guide 按设计文档 §5 的内容概要编写。写法对标 `guide-execute.md`（56 行）风格——紧凑、纯操作指南、引用已有 guide 避免重复。
 
 - [ ] **任务 5：`guide-loop-entry.md`**（~30 行）
-  - §一 Loop Engineering 3 句定义
-  - §二 实施模式 vs 验收模式
-  - §三 接下来 Q2 选择
+
+  写入完整正文（实现者照此写文件，其他 guide 同模式）：
+
+  ```markdown
+  # Loop Engineering 编排 — 入口
+
+  > PM 选择「Loop Engineering 编排」维度后加载。
+
+  ## Loop Engineering 是什么
+
+  不去手动 prompt Agent，而是设计**自动 prompt Agent 的循环系统**。
+  每步执行后自动验证，通过才走下一步——形成闭环。
+
+  ## 两种模式
+
+  | 模式 | 场景 | 流程 |
+  |------|------|------|
+  | **实施循环** | 有待完成的任务 | 创建 session → 逐步执行 → 每步 grade_step 验证 → 通过才继续 |
+  | **验收循环** | 有已完成的结果 | 对照 criteria → grade_step 逐条评分 → 不合格回修 → 重验 |
+
+  ## 下一步
+
+  选择循环类型（Q2）：实施 or 验收？
+  ```
 
 - [ ] **任务 6：`guide-loop-implement.md`**（~50 行）
   - §一 实施循环模型（5 步流程图）
@@ -417,7 +499,7 @@ git commit -m "feat: 新增 7 个 Loop Engineering 分层 guide (~310行)"
 **文件：**
 - 修改：`skills/kimi-session-orchestrator/SKILL.md`
 
-- [ ] **步骤 1：Q1 选项重排**
+- [ ] **步骤 1：Q1 选项重排 + 旧 Q2b 触发条件修正**
 
 将 line 30-32 的 Q1 选项替换为：
 
@@ -429,6 +511,8 @@ git commit -m "feat: 新增 7 个 Loop Engineering 分层 guide (~310行)"
 ```
 
 同步更新 auto 模式下的纯文本提示（line 20-23）。
+
+将现有的 Q2b `（仅 Q1=A 时追问）` 改为 `（仅 Q1=B 时追问）`——因为 A 现在是 Loop Engineering，旧 A（规划）变为 B。
 
 - [ ] **步骤 2：Q2 Loop 子问题**
 
