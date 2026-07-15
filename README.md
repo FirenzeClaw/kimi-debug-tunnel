@@ -3,9 +3,9 @@
 # Kimi Session Orchestrator
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-v2.8.5-brightgreen)]()
+[![Version](https://img.shields.io/badge/version-v2.9.0-brightgreen)]()
 [![Node](https://img.shields.io/badge/node-%E2%89%A5%2022-339933)]()
-[![MCP Tools](https://img.shields.io/badge/MCP%20tools-28-orange)]()
+[![MCP Tools](https://img.shields.io/badge/MCP%20tools-29-orange)]()
 
 Kimi Code CLI 的 PM 视角多 session 编排系统——28 个 MCP 工具，支持自适应工作流引擎 + 三层共享内存 + 权限策略管理。
 
@@ -285,6 +285,12 @@ cp -r skills/session-retire ~/.kimi-code/skills/session-retire
 | `approve_tool` | PM 放行被阻断的工具调用（once/session scope） |
 | `deny_tool` | PM 拒绝被阻断的工具调用 |
 
+### 验证评分
+
+| 工具 | 描述 |
+|------|------|
+| `grade_step` | LLM 自动评分验证——对 task session 产出按标准评分，返回 pass/fail + 反馈 |
+
 ### 推送
 
 | 工具 | 描述 |
@@ -423,6 +429,7 @@ PM 操作:                            Task session 首 turn:
 | `specs/003-permission-policy/` | 权限与策略管理 [DONE] |
 | `specs/004-memory-lazy-inject/` | 记忆注入策略升级——索引+按需自读 [DONE] |
 | `specs/005-web-ui-extension/` | Kimi Web UI 编排监控插件——浏览器扩展+JS脚本双版本 |
+| `docs/loop-engineering-analysis.md` | Loop Engineering 概念与本项目架构逐项对照分析——四层循环堆栈/三级 Agent Loop/差距识别/改进方向 |
 | `docs/superpowers/specs/2026-07-11-skill-split-design.md` | [DONE] Skill 拆分加载架构设计 |
 | `docs/superpowers/plans/2026-07-11-skill-split.md` | [DONE] Skill 拆分实现计划 |
 
@@ -575,6 +582,7 @@ npm start
 
 | 日期 | 版本 | 变更 |
 |------|:--:|------|
+| 2026-07-15 | v2.9.0 | **Loop Engineering 验证闭环**——Q1 A入口 + 7分层guide + `grade_step` LLM评分工具 + loop指纹检测。PM 可选实施/验收模式、单/并行策略，guide 按需加载节省56-60% token |
 | 2026-07-15 | v2.8.5 | **修复 `fromSession` handoff 注入被空守卫截断**（`memory-store.ts` `buildInjection()`）：project 知识库为空时提前返回 "无共享记忆条目"，导致 `session-retire` 写入的 handoff 数据（completed/pending/decisions）被静默丢弃，新 session 仅收到 7-block 模板文本。修复后 handoff 收集提前到空守卫之前，联合判空，新增 handoff-only 分支，去重 DB 查询。`agent-tool-reliability` 项目实测验证 |
 | 2026-07-14 | v2.8.4 | poll_command `fetch_result` 彻底修复：curl 管道截断 → Python `urllib` 直连 HTTP；`2>/dev/null` 移除（错误不再静默吞）；Windows GBK emoji 乱码 → `PYTHONIOENCODING=utf-8` |
 | 2026-07-14 | v2.8.3 | `detectKimiServerUrl()` 过期 lock 自动清理——PID 活性检测 + 自动删 lock + `connect()` 重连前 URL 重新检测 |
