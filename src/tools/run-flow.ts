@@ -1,7 +1,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { TunnelServices } from "../types.js";
-import { WorkflowEngine } from "../workflow-engine.js";
 import type { WorkflowTemplate } from "../workflow-template.js";
 
 export function registerRunFlow(server: McpServer, services: TunnelServices): void {
@@ -37,13 +36,9 @@ export function registerRunFlow(server: McpServer, services: TunnelServices): vo
         timeout: { perStep: 600000, total: 3600000 },
       };
 
-      // Fire-and-forget via WorkflowEngine (use shared engine if available)
-      const engine = services.workflowEngine || new WorkflowEngine(wireClient, services.messageQueue);
-      const pmSessionId = wireClient.getSessionId();
-      // Ensure memory store is wired for the fallback path (shared engine already has it)
-      if (!services.workflowEngine && services.memoryStore) {
-        engine.setMemoryStore(services.memoryStore, services.tunnelProjectRoot ?? null);
-      }
+      // Fire-and-forget via WorkflowEngine
+      const engine = workflowEngine;
+      const pmSessionId = wireClient.getPmSessionId();
       engine.execute(template, { autoMode: auto_mode, model, thinking, policy, memory_level, from_session })
         .then(r => {
           // Track orchestration relationship (PM → child)

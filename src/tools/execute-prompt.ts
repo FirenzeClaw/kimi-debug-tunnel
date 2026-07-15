@@ -60,8 +60,6 @@ export function registerExecutePrompt(server: McpServer, services: TunnelService
       }
 
       try {
-        wireClient.setSessionId(session_id);
-
         const effectivePrompt = preparePrompt(services, {
           sessionId: session_id,
           prompt,
@@ -71,7 +69,7 @@ export function registerExecutePrompt(server: McpServer, services: TunnelService
 
         if (!wait) {
           // Fire-and-forget: submit prompt, return immediately with poll command
-          const { promptId } = await wireClient.submitPrompt(effectivePrompt, { autoApprove: auto_mode });
+          const { promptId } = await wireClient.submitPrompt(session_id, effectivePrompt, { autoApprove: auto_mode });
           return {
             content: [{
               type: "text",
@@ -84,7 +82,7 @@ export function registerExecutePrompt(server: McpServer, services: TunnelService
           };
         }
 
-        const response = await wireClient.sendPrompt(effectivePrompt, {
+        const response = await wireClient.sendPrompt(session_id, effectivePrompt, {
           timeoutMs: timeout_ms,
           includeThinking: include_thinking,
           autoApprove: auto_mode,

@@ -11,6 +11,7 @@ import type {
   ExecutionStatus,
 } from "./workflow-template.js";
 import type { KimiContentBlock } from "./wire-client.js";
+import { injectMemoryIntoPrompt, setMemoryProfileWithExpiry } from "./tools/helpers.js";
 
 // ── Ambiguity Detection ─────────────────────────────────────────────────────────
 
@@ -155,7 +156,6 @@ export class WorkflowEngine {
     const { autoMode, onProgress, model, thinking, policy, memory_level, from_session } = options;
     const executionId = randomUUID();
     const startTime = Date.now();
-    const originalSessionId = this.wireClient.getSessionId();
 
     const stepResults: StepResult[] = [];
     let status: ExecutionStatus = "running";
@@ -195,32 +195,13 @@ export class WorkflowEngine {
       }
 
       // Store memory profile for auto-injection on first step (SPEC 002)
-      if (memory_level && memory_level !== "off") {
-        try {
-          if (this.memoryStore && this.tunnelProjectRoot) {
-            this.memoryStore.ensureDb(this.tunnelProjectRoot);
-            // Check for expired entries in relevant namespaces
-            const nsToCheck = memory_level === "minimal"
-              ? ["project/meta"]
-              : memory_level === "standard"
-              ? ["project/meta", "project/decisions"]
-              : ["project/meta", "project/decisions", "project/risks", "project/learnings"];
-            let hasExpired = false;
-            for (const ns of nsToCheck) {
-              const entries = this.memoryStore.get(ns);
-              if (entries.some((e) => e.expired)) { hasExpired = true; break; }
-            }
-            this.memoryStore.setMemoryProfile(sessionId, {
-              level: memory_level,
-              cwd: template.projectCwd,
-              fromSession: from_session,
-              hasExpiredEntries: hasExpired,
-            });
-            process.stderr.write(`[workflow-engine] Memory profile set for ${sessionId} (level: ${memory_level})\n`);
-          }
-        } catch (memErr) {
-          // Non-fatal: memory injection failure shouldn't block workflow
-          process.stderr.write(`[workflow-engine] Memory profile warning: ${(memErr as Error).message}\n`);
+      if (memory_level) {
+        setMemoryProfileWithExpiry(
+          this.memoryStore, this.tunnelProjectRoot, sessionId,
+          { level: memory_level, cwd: template.projectCwd, fromSession: from_session }
+        );
+        if (this.memoryStore && this.tunnelProjectRoot && memory_level !== "off") {
+          process.stderr.write(`[workflow-engine] Memory profile set for ${sessionId} (level: ${memory_level})\n`);
         }
       }
 
@@ -237,8 +218,6 @@ export class WorkflowEngine {
         timestamp: new Date().toISOString(),
       });
     } catch (err) {
-      // Restore original session on failure
-      if (originalSessionId) this.wireClient.setSessionId(originalSessionId);
       return {
         executionId,
         template: template.name,
@@ -311,9 +290,6 @@ export class WorkflowEngine {
     const totalDuration = Date.now() - startTime;
     const summary = this.buildSummary(template.name, stepResults, status, totalDuration);
 
-    // Restore original session
-    if (originalSessionId) this.wireClient.setSessionId(originalSessionId);
-
     // Clean up: remove terminal executions
     if (status !== "awaiting_user") {
       this.activeExecutions.delete(executionId);
@@ -367,29 +343,15 @@ export class WorkflowEngine {
         let instruction = step.instruction;
         if (stepIndex === 0 && this.memoryStore && this.tunnelProjectRoot) {
           const profile = this.memoryStore.getMemoryProfile(sessionId);
-          if (profile && profile.level !== "off") {
-            try {
-              const injection = this.memoryStore.buildInjection({
-                level: profile.level as "off" | "minimal" | "standard" | "full",
-                maxBytes: 8192,
-                fromSession: profile.fromSession,
-                cwd: profile.cwd,
-                hasExpiredEntries: profile.hasExpiredEntries,
-              });
-              if (injection) {
-                const warning = profile.hasExpiredEntries
-                  ? "⚠️ 警告: 以下注入的部分条目已被 PM 标记为过期，内容可能不是最新。\n\n"
-                  : "";
-                instruction = `${warning}${injection}\n\n---\n\n${instruction}`;
-              }
-            } catch {
-              // Non-fatal: memory injection failure shouldn't block the step
-            }
+          if (profile) {
+            instruction = injectMemoryIntoPrompt(
+              this.memoryStore, this.tunnelProjectRoot, sessionId, instruction, profile
+            );
           }
         }
 
         // Send instruction and wait for response
-        const response = await this.wireClient.sendPrompt(instruction, {
+        const response = await this.wireClient.sendPrompt(sessionId, instruction, {
           timeoutMs: template.timeout.perStep,
           autoApprove: autoMode,
         });
@@ -476,7 +438,7 @@ export class WorkflowEngine {
             blockages.push(blockage);
             if (attempt <= maxRetries) {
               const adjustedInstruction = `${step.instruction}\n\n[上一步遇到问题: ${blockage.context.slice(0, 200)}]\n${blockage.resolution}`;
-              await this.wireClient.sendPrompt(adjustedInstruction, {
+              await this.wireClient.sendPrompt(sessionId, adjustedInstruction, {
                 timeoutMs: template.timeout.perStep,
                 autoApprove: autoMode,
               });

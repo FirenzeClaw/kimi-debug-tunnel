@@ -37,6 +37,9 @@ async function main(): Promise<void> {
   workflowEngine.setMemoryStore(memoryStore, projectRoot);
 
   const services: TunnelServices = {
+    sessionClient: wireClient,
+    statusClient: wireClient,
+    pushClient: wireClient,
     wireClient,
     messageQueue,
     startTime: Date.now(),

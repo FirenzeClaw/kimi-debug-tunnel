@@ -39,11 +39,11 @@ export function registerApproveTool(server: McpServer, services: TunnelServices)
         // If we have an approval_id, POST the approval to Kimi Server
         let apiApproved = false;
         if (approval_id && wireClient.isConnected()) {
+          if (!sid) {
+            return { content: [{ type: "text", text: "approval_id 需要配合 session_id 使用" }], isError: true };
+          }
           try {
-            await wireClient.apiPost(
-              `/api/v1/sessions/${sid}/approvals/${approval_id}`,
-              { decision: "approved", scope: "session" }
-            );
+            await wireClient.resolveApproval(sid, approval_id, "approved", "PM 放行");
             apiApproved = true;
           } catch (err) {
             return {

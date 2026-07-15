@@ -49,7 +49,12 @@ export function startHttpServer(port: number, services: TunnelServices): void {
     }
 
     try {
-      const response = await wireClient.sendPrompt(prompt, {
+      const sid = wireClient.getPmSessionId();
+      if (!sid) {
+        res.status(400).json({ error: "No session selected. Use create_session or list_sessions first." });
+        return;
+      }
+      const response = await wireClient.sendPrompt(sid, prompt, {
         timeoutMs: timeout_ms || 300000,
         includeThinking: include_thinking || false,
       });
@@ -135,8 +140,13 @@ export function startHttpServer(port: number, services: TunnelServices): void {
         if (data.type === "command" && data.content) {
           // Direct execute via Wire if connected
           if (wireClient.isConnected() && data.execute_direct !== false) {
+            const sid = wireClient.getPmSessionId();
+            if (!sid) {
+              ws.send(JSON.stringify({ type: "error", content: "No session selected", timestamp: new Date().toISOString() }));
+              return;
+            }
             wireClient
-              .sendPrompt(data.content, {
+              .sendPrompt(sid, data.content, {
                 includeThinking: data.include_thinking || false,
               })
               .then((response) => {

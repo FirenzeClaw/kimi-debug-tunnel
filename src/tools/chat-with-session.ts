@@ -25,8 +25,6 @@ export function registerChatWithSession(server: McpServer, services: TunnelServi
         return { content: [{ type: "text", text: "Wire client 未连接到 Kimi Server。请先启动: kimi web --no-open" }], isError: true };
       }
 
-      wireClient.setSessionId(session_id);
-
       const effectivePrompt = preparePrompt(services, {
         sessionId: session_id,
         prompt: task,
@@ -35,7 +33,7 @@ export function registerChatWithSession(server: McpServer, services: TunnelServi
       });
 
       try {
-        const { promptId } = await wireClient.submitPrompt(effectivePrompt, { autoApprove: auto_mode });
+        const { promptId } = await wireClient.submitPrompt(session_id, effectivePrompt, { autoApprove: auto_mode });
         return {
           content: [{ type: "text", text: JSON.stringify({
             submitted: true, session_id, prompt_id: promptId,

@@ -14,7 +14,7 @@ import { dirname } from "node:path";
 import { WebSocket } from "ws";
 import { WireTransport } from "./wire-transport.js";
 import { detectKimiServerUrl } from "./server-lock.js";
-import type { IWireClient } from "./types.js";
+import type { ISessionClient, IStatusClient, IPushClient } from "./types.js";
 import type { PolicyEngine } from "./policy-engine.js";
 import type { MessageQueue } from "./message-queue.js";
 
@@ -76,7 +76,7 @@ interface SessionEvent {
   };
 }
 
-export class WireClient implements IWireClient {
+export class WireClient implements ISessionClient, IStatusClient, IPushClient {
   private baseUrl: string;
   private token: string;
   private sessionId: string;
@@ -124,16 +124,22 @@ export class WireClient implements IWireClient {
     this.transport = new WireTransport({ baseUrl: this.baseUrl, token: this.token });
   }
 
+  /** Internal: set session ID for WS subscription tracking (v2.11: not in public interface). */
   setSessionId(sessionId: string): void {
     const oldId = this.sessionId;
     this.sessionId = sessionId;
-    // Subscribe to new session via WebSocket if already connected
     if (this.ws && this.ws.readyState === WebSocket.OPEN && sessionId && sessionId !== oldId) {
       this.wsSubscribe(sessionId);
     }
   }
 
+  /** Internal: get session ID for startup auto-select (v2.11: use getPmSessionId for tools). */
   getSessionId(): string {
+    return this.sessionId;
+  }
+
+  /** PM session ID for orchestration tracking (read-only, no mutation). */
+  getPmSessionId(): string {
     return this.sessionId;
   }
 
@@ -194,7 +200,7 @@ export class WireClient implements IWireClient {
     );
 
     // Update internal sessionId so subsequent API calls target this session
-    this.sessionId = resp.id;
+    this.setSessionId(resp.id);
     this.sessionPermissionMode = options.permissionMode || null;
 
     return { sessionId: resp.id, title: resp.title };
@@ -460,7 +466,7 @@ export class WireClient implements IWireClient {
     this.watchPollTimer = setInterval(async () => {
       if (!this.watchOutputPath || !this.sessionId) return;
       try {
-        const status = (await this.getSessionStatus()) || "unknown";
+        const status = (await this.getSessionStatus(this.sessionId)) || "unknown";
         if (status === "idle" || status === "aborted") {
           // Fetch messages to get the result
           const msgs = await this.transport.apiGet<{ items: Array<{ content: Array<{ type: string; text?: string }> }> }>(
@@ -532,7 +538,7 @@ export class WireClient implements IWireClient {
           resolve("timeout");
           return;
         }
-        const status = await this.getSessionStatus();
+        const status = await this.getSessionStatus(sessionId);
         if (status === targetStatus || status === "unknown" || status === "aborted") {
           resolve(status);
           return;
@@ -548,6 +554,7 @@ export class WireClient implements IWireClient {
   // ═══════════════════════════════════════════════════════════════════════════════
 
   async submitPrompt(
+    sessionId: string,
     prompt: string,
     options: { autoApprove?: boolean } = {}
   ): Promise<{ promptId: string }> {
@@ -556,32 +563,28 @@ export class WireClient implements IWireClient {
     if (!this.connected) {
       throw new Error("Wire client not connected");
     }
-    if (!this.sessionId) {
-      throw new Error("No session ID set.");
-    }
 
     // Guard: wait for session ready via WebSocket (or polling fallback)
-    const preStatus = await this.waitForStatus(this.sessionId, "idle", 60000, autoApprove);
+    const preStatus = await this.waitForStatus(sessionId, "idle", 60000, autoApprove);
     if (preStatus === "running") {
       if (autoApprove) {
-        // Wait a bit more and retry
         await sleep(2000);
-        const retryStatus = await this.waitForStatus(this.sessionId, "idle", 58000, autoApprove);
+        const retryStatus = await this.waitForStatus(sessionId, "idle", 58000, autoApprove);
         if (retryStatus === "running") {
           throw new Error(
-            `Session ${this.sessionId} is busy. Wait for the current turn to complete.`
+            `Session ${sessionId} is busy. Wait for the current turn to complete.`
           );
         }
       } else {
         throw new Error(
-          `Session ${this.sessionId} is busy (status: ${preStatus}). ` +
+          `Session ${sessionId} is busy (status: ${preStatus}). ` +
           `Wait for the current turn to complete before sending a new prompt.`
         );
       }
     }
 
     // Subscribe to this session if not already
-    this.wsSubscribe(this.sessionId);
+    this.wsSubscribe(sessionId);
 
     const body: Record<string, unknown> = {
       content: [{ type: "text", text: prompt }],
@@ -591,7 +594,7 @@ export class WireClient implements IWireClient {
     }
 
     const resp = await this.transport.apiPost<{ prompt_id: string }>(
-      `/api/v1/sessions/${this.sessionId}/prompts`,
+      `/api/v1/sessions/${sessionId}/prompts`,
       body
     );
     return { promptId: resp.prompt_id };
@@ -602,6 +605,7 @@ export class WireClient implements IWireClient {
    * Uses WebSocket push when available, falls back to polling.
    */
   async sendPrompt(
+    sessionId: string,
     prompt: string,
     options: {
       timeoutMs?: number;
@@ -614,22 +618,19 @@ export class WireClient implements IWireClient {
     if (!this.connected) {
       throw new Error("Wire client not connected");
     }
-    if (!this.sessionId) {
-      throw new Error("No session ID set. Use list_sessions to find one.");
-    }
 
     // Step 0: Wait for session ready via WebSocket push (or polling fallback)
-    const preStatus = await this.waitForStatus(this.sessionId, "idle", Math.min(timeoutMs, 60000), autoApprove);
+    const preStatus = await this.waitForStatus(sessionId, "idle", Math.min(timeoutMs, 60000), autoApprove);
 
     if (preStatus === "awaiting_approval") {
         throw new Error(
-          `Session ${this.sessionId} is awaiting approval. ` +
+          `Session ${sessionId} is awaiting approval. ` +
           `Approve or deny manually before sending a new prompt.`
         );
     }
 
     // Subscribe to events
-    this.wsSubscribe(this.sessionId);
+    this.wsSubscribe(sessionId);
 
     // Step 1: Submit prompt via REST
     const submitResp = await this.transport.apiPost<{
@@ -637,44 +638,33 @@ export class WireClient implements IWireClient {
       user_message_id: string;
       status: string;
       content: KimiContentBlock[];
-    }>(`/api/v1/sessions/${this.sessionId}/prompts`, {
+    }>(`/api/v1/sessions/${sessionId}/prompts`, {
       content: [{ type: "text", text: prompt }],
     });
 
     const promptId = submitResp.prompt_id;
 
     // Step 2: Wait for status to return to idle via WebSocket (or polling)
-    const remainingTimeout = timeoutMs - 3000; // subtract the time spent above
-    const finalStatus = await this.waitForStatus(
-      this.sessionId,
+    const remainingTimeout = timeoutMs - 3000;
+    await this.waitForStatus(
+      sessionId,
       "idle",
       Math.max(remainingTimeout, 10000),
       autoApprove
     );
 
-    // Step 3: Fetch the response messages
-    const allMessages: KimiContentBlock[] = [];
+    // Step 3: Fetch the response messages using semantic method
+    const allMessages = await this._fetchSessionMessages(sessionId, { pageSize: 50, role: "assistant" });
     let finalText = "";
     let thinkingText = "";
 
-    try {
-      const msgsResp = await this.transport.apiGet<{ items: KimiMessage[] }>(
-        `/api/v1/sessions/${this.sessionId}/messages?page_size=50&role=assistant`
-      );
-
-      for (const msg of (msgsResp.items || [])) {
-        for (const block of msg.content) {
-          allMessages.push(block);
-          if (block.type === "text" && block.text) {
-            finalText += block.text;
-          }
-          if (block.type === "thinking" && block.thinking) {
-            thinkingText += block.thinking;
-          }
-        }
+    for (const block of allMessages) {
+      if (block.type === "text" && block.text) {
+        finalText += block.text;
       }
-    } catch {
-      // Fetch failed — return what we have
+      if (block.type === "thinking" && block.thinking) {
+        thinkingText += block.thinking;
+      }
     }
 
     return {
@@ -701,16 +691,16 @@ export class WireClient implements IWireClient {
     return messages.filter((b) => b.type !== "thinking");
   }
 
-  async getSessionStatus(): Promise<string> {
+  async getSessionStatus(sessionId: string): Promise<string> {
     // Fast path: WebSocket cache
-    const cached = this.sessionStateCache.get(this.sessionId);
+    const cached = this.sessionStateCache.get(sessionId);
     if (cached && Date.now() - cached.updatedAt < 30000) {
       return cached.status;
     }
     // Fallback: REST API
     try {
       const resp = await this.transport.apiGet<{ status: string }>(
-        `/api/v1/sessions/${this.sessionId}/status`
+        `/api/v1/sessions/${sessionId}/status`
       );
       return resp.status || "unknown";
     } catch {
@@ -796,18 +786,52 @@ export class WireClient implements IWireClient {
     }
   }
 
-  // REST helpers (delegated to WireTransport)
+  // Semantic REST methods (v2.11 — replacing raw apiGet/apiPost)
   // ═══════════════════════════════════════════════════════════════════════════════
 
-  // REST helpers (delegated to WireTransport)
-  // ═══════════════════════════════════════════════════════════════════════════════
-
-  async apiGet<T>(path: string): Promise<T> {
-    return this.transport.apiGet<T>(path);
+  /** Fetch messages from a session — replaces raw apiGet path construction. */
+  async getSessionMessages(
+    sessionId: string,
+    opts: { pageSize?: number; role?: string } = {}
+  ): Promise<KimiContentBlock[]> {
+    const { pageSize = 50, role = "assistant" } = opts;
+    const blocks: KimiContentBlock[] = [];
+    try {
+      const msgsResp = await this.transport.apiGet<{ items: KimiMessage[] }>(
+        `/api/v1/sessions/${sessionId}/messages?page_size=${pageSize}&role=${role}`
+      );
+      for (const msg of (msgsResp.items || [])) {
+        for (const block of msg.content) {
+          blocks.push(block);
+        }
+      }
+    } catch {
+      // Non-fatal
+    }
+    return blocks;
   }
 
-  async apiPost<T>(path: string, body: unknown): Promise<T> {
-    return this.transport.apiPost<T>(path, body);
+  /** Resolve a pending tool approval — replaces raw apiPost path construction. */
+  async resolveApproval(
+    sessionId: string,
+    approvalId: string,
+    action: "approved" | "rejected",
+    reason?: string
+  ): Promise<void> {
+    const body: Record<string, unknown> = { decision: action };
+    if (reason) body.reason = reason;
+    await this.transport.apiPost(
+      `/api/v1/sessions/${sessionId}/approvals/${approvalId}`,
+      body
+    );
+  }
+
+  /** Internal: fetch messages for sendPrompt's Step 3 (v2.11). */
+  private async _fetchSessionMessages(
+    sessionId: string,
+    opts: { pageSize?: number; role?: string } = {}
+  ): Promise<KimiContentBlock[]> {
+    return this.getSessionMessages(sessionId, opts);
   }
 }
 

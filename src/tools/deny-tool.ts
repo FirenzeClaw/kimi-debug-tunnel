@@ -28,11 +28,11 @@ export function registerDenyTool(server: McpServer, services: TunnelServices): v
         // If we have an approval_id, POST denial to Kimi Server
         let apiDenied = false;
         if (approval_id && wireClient.isConnected()) {
+          if (!sid) {
+            return { content: [{ type: "text", text: "approval_id 需要配合 session_id 使用" }], isError: true };
+          }
           try {
-            await wireClient.apiPost(
-              `/api/v1/sessions/${sid}/approvals/${approval_id}`,
-              { decision: "rejected", reason: "PM 拒绝" }
-            );
+            await wireClient.resolveApproval(sid, approval_id, "rejected", "PM 拒绝");
             apiDenied = true;
           } catch (err) {
             return {

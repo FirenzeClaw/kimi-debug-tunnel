@@ -31,7 +31,6 @@ export function registerGradeStep(server: McpServer, services: TunnelServices): 
         ?.map((r) => `[Turn ${r.turn}] ${r.type === "user" ? "Prompt" : "Response"}: ${r.content}`)
         .join("\n\n") ?? "(无法读取 session 产出)";
 
-      const prevSessionId = wireClient.getSessionId();
       const focusHint = focus ? `评分侧重维度: ${focus}。` : "";
 
       const gradingPrompt = `你是独立产出质量评分助手。以下是 task session ${session_id} 的最近产出，请根据验收标准评估质量。
@@ -56,12 +55,8 @@ ${focusHint}`;
           _graderSessionId = created.sessionId;
         }
 
-        // 切到 grader session 评分
-        wireClient.setSessionId(_graderSessionId);
-        const response = await wireClient.sendPrompt(gradingPrompt, { timeoutMs: 30000, autoApprove: true });
-
-        // 切回原 session
-        wireClient.setSessionId(prevSessionId);
+        // 评分：直接传递 grader session ID，无需 save/restore
+        const response = await wireClient.sendPrompt(_graderSessionId, gradingPrompt, { timeoutMs: 30000, autoApprove: true });
 
         try {
           const parsed = JSON.parse(response.finalText);
@@ -78,7 +73,6 @@ ${focusHint}`;
           };
         } catch {
           // JSON 解析失败（常见于 grader 反馈过长导致 finalText 截断）
-          // 用正则 fallback 从截断文本中提取关键字段
           const passMatch = response.finalText.match(/"pass"\s*:\s*(true|false)/);
           const scoreMatch = response.finalText.match(/"score"\s*:\s*(\d+)/);
           const feedbackMatch = response.finalText.match(/"feedback"\s*:\s*"([^"]*)/);
@@ -98,7 +92,6 @@ ${focusHint}`;
           };
         }
       } catch (err) {
-        wireClient.setSessionId(prevSessionId);
         return {
           content: [{ type: "text", text: `grade_step 失败: ${(err as Error).message}` }],
           isError: true,

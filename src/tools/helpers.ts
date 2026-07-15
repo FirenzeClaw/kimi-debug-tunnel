@@ -4,9 +4,12 @@
  *
  * v2.10: Extracted from execute-prompt.ts, chat-with-session.ts, create-session.ts,
  * and workflow-engine.ts (~25 lines each × 4 = ~100 lines saved).
+ * v2.11: Extracted injectMemoryIntoPrompt + setMemoryProfileWithExpiry to
+ * eliminate the last two duplicated memory-injection copies (workflow-engine.ts,
+ * create-session.ts).
  */
 
-import type { TunnelServices } from "../types.js";
+import type { TunnelServices, IMemoryStore, InjectionProfile } from "../types.js";
 
 export interface PreparePromptOpts {
   sessionId: string;
@@ -14,6 +17,79 @@ export interface PreparePromptOpts {
   skipMemory?: boolean;
   policy?: string;
   cwd?: string;  // used for policy resolution
+}
+
+/**
+ * Pure function: inject shared memory text into a prompt if a profile exists.
+ * Called by preparePrompt (tools) and workflow-engine driveStep (private).
+ * No side effects beyond reading from memoryStore.
+ *
+ * @returns The prompt text with memory injection prepended, or the original prompt.
+ */
+export function injectMemoryIntoPrompt(
+  memoryStore: IMemoryStore,
+  tunnelProjectRoot: string,
+  sessionId: string,
+  prompt: string,
+  profile: { level: string; cwd: string; fromSession?: string; hasExpiredEntries?: boolean }
+): string {
+  if (profile.level === "off") return prompt;
+  try {
+    memoryStore.ensureDb(tunnelProjectRoot);
+    const injection = memoryStore.buildInjection({
+      level: profile.level as InjectionProfile["level"],
+      maxBytes: 8192,
+      fromSession: profile.fromSession,
+      cwd: profile.cwd,
+      hasExpiredEntries: profile.hasExpiredEntries,
+    });
+    if (injection) {
+      const warning = profile.hasExpiredEntries
+        ? "⚠️ 警告: 以下注入的部分条目已被 PM 标记为过期，内容可能不是最新。\n\n"
+        : "";
+      return `${warning}${injection}\n\n---\n\n${prompt}`;
+    }
+  } catch {
+    // Non-fatal: memory injection failure shouldn't block
+  }
+  return prompt;
+}
+
+/**
+ * Set a memory profile on a session after checking for expired entries.
+ * Extracted from create-session.ts and workflow-engine.ts:execute().
+ * No-op if memoryStore or tunnelProjectRoot is absent.
+ */
+export function setMemoryProfileWithExpiry(
+  memoryStore: IMemoryStore | null | undefined,
+  tunnelProjectRoot: string | null | undefined,
+  sessionId: string,
+  opts: { level: string; cwd: string; fromSession?: string }
+): void {
+  if (!memoryStore || !tunnelProjectRoot) return;
+  if (opts.level === "off") return;
+  try {
+    memoryStore.ensureDb(tunnelProjectRoot);
+    const nsToCheck =
+      opts.level === "minimal"
+        ? ["project/meta"]
+        : opts.level === "standard"
+        ? ["project/meta", "project/decisions"]
+        : ["project/meta", "project/decisions", "project/risks", "project/learnings"];
+    let hasExpired = false;
+    for (const ns of nsToCheck) {
+      const entries = memoryStore.get(ns);
+      if (entries.some((e) => e.expired)) { hasExpired = true; break; }
+    }
+    memoryStore.setMemoryProfile(sessionId, {
+      level: opts.level,
+      cwd: opts.cwd,
+      fromSession: opts.fromSession,
+      hasExpiredEntries: hasExpired,
+    });
+  } catch {
+    // Non-fatal
+  }
 }
 
 /**
@@ -41,32 +117,14 @@ export function preparePrompt(
   }
 
   // Build effective prompt with optional memory injection (SPEC 002)
-  let effectivePrompt = prompt;
   if (!skipMemory && memoryStore && tunnelProjectRoot) {
     const profile = memoryStore.getMemoryProfile(sessionId);
-    if (profile && profile.level !== "off") {
-      try {
-        memoryStore.ensureDb(tunnelProjectRoot);
-        const injection = memoryStore.buildInjection({
-          level: profile.level as "off" | "minimal" | "standard" | "full",
-          maxBytes: 8192,
-          fromSession: profile.fromSession,
-          cwd: profile.cwd,
-          hasExpiredEntries: profile.hasExpiredEntries,
-        });
-        if (injection) {
-          const warning = profile.hasExpiredEntries
-            ? "⚠️ 警告: 以下注入的部分条目已被 PM 标记为过期，内容可能不是最新。\n\n"
-            : "";
-          effectivePrompt = `${warning}${injection}\n\n---\n\n${prompt}`;
-        }
-      } catch {
-        // Non-fatal: memory injection failure shouldn't block prompt submission
-      }
+    if (profile) {
+      return injectMemoryIntoPrompt(memoryStore, tunnelProjectRoot, sessionId, prompt, profile);
     }
   }
 
-  return effectivePrompt;
+  return prompt;
 }
 
 /**

@@ -2,10 +2,9 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { TunnelServices } from "../types.js";
 import { loadTemplate } from "../workflow-store.js";
-import { WorkflowEngine } from "../workflow-engine.js";
 
 export function registerExecuteWorkflow(server: McpServer, services: TunnelServices): void {
-  const { wireClient } = services;
+  const { wireClient, workflowEngine } = services;
 
   server.tool(
     "execute_workflow",
@@ -86,9 +85,9 @@ export function registerExecuteWorkflow(server: McpServer, services: TunnelServi
       // Bind policy if specified — passed through to engine which binds after session creation
       // (no placeholder binding here; engine.execute() receives policy option)
 
-      // Run engine (use shared workflowEngine from services — already wired with memory store)
-      const engine = (services.workflowEngine ?? new WorkflowEngine(wireClient, services.messageQueue)) as WorkflowEngine;
-      const pmSessionId = wireClient.getSessionId();
+      // Run engine (uses shared workflowEngine from services — already wired with memory store)
+      const engine = workflowEngine;
+      const pmSessionId = wireClient.getPmSessionId();
       const effectiveCwd = cwd || template.projectCwd;
 
       // Start execution (async, non-blocking for the tool)

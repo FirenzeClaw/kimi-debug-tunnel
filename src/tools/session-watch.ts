@@ -7,7 +7,7 @@ let watcher: SessionWatcher | null = null;
 
 function getWatcher(services: TunnelServices): SessionWatcher {
   if (!watcher) {
-    watcher = new SessionWatcher(services.wireClient);
+    watcher = new SessionWatcher(services.sessionClient, services.statusClient);
   }
   return watcher;
 }

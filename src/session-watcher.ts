@@ -1,4 +1,4 @@
-import type { IWireClient } from "./types.js";
+import type { ISessionClient, IStatusClient } from "./types.js";
 
 interface WatchEntry {
   sessionId: string;
@@ -16,11 +16,13 @@ interface WatchEntry {
  */
 export class SessionWatcher {
   private watches = new Map<string, WatchEntry>();
-  private wireClient: IWireClient;
+  private sessionClient: ISessionClient;
+  private statusClient: IStatusClient;
   private pollInterval: ReturnType<typeof setInterval> | null = null;
 
-  constructor(wireClient: IWireClient) {
-    this.wireClient = wireClient;
+  constructor(sessionClient: ISessionClient, statusClient: IStatusClient) {
+    this.sessionClient = sessionClient;
+    this.statusClient = statusClient;
   }
 
   /**
@@ -90,12 +92,9 @@ export class SessionWatcher {
     // Auto-submit next instruction and start watching (now properly sequenced)
     if (nextInstruction) {
       const sessionId = entry.sessionId;
-      const originalSession = this.wireClient.getSessionId();
 
       try {
-        this.wireClient.setSessionId(sessionId);
-        // Wait for submission to complete before starting to watch
-        await this.wireClient.submitPrompt(nextInstruction, { autoApprove: true });
+        await this.sessionClient.submitPrompt(sessionId, nextInstruction, { autoApprove: true });
         // Now safe to start watching — the new turn is in flight
         const newWatchId = this.watch(sessionId);
         return { ...response, next_watch_id: newWatchId };
@@ -104,8 +103,6 @@ export class SessionWatcher {
         // Even on failure, try watching (the prompt may have been injected mid-turn)
         const newWatchId = this.watch(sessionId);
         return { ...response, next_watch_id: newWatchId };
-      } finally {
-        this.wireClient.setSessionId(originalSession);
       }
     }
 
@@ -143,17 +140,14 @@ export class SessionWatcher {
     for (const [watchId, entry] of active) {
       try {
         // Check WS cache first (zero I/O), fall back to REST
-        const cached = this.wireClient.getCachedStatus(entry.sessionId);
+        const cached = this.statusClient.getCachedStatus(entry.sessionId);
         if (cached === "idle" || cached === "aborted" || cached === "awaiting_approval") {
           await this.resolveWatch(watchId, entry);
           continue;
         }
 
         // If no WS cache hit, try REST status
-        const originalSession = this.wireClient.getSessionId();
-        this.wireClient.setSessionId(entry.sessionId);
-        const status = await this.wireClient.getSessionStatus();
-        this.wireClient.setSessionId(originalSession);
+        const status = await this.statusClient.getSessionStatus(entry.sessionId);
 
         if (status === "idle" || status === "aborted" || status === "awaiting_approval") {
           await this.resolveWatch(watchId, entry);
@@ -166,27 +160,15 @@ export class SessionWatcher {
 
   private async resolveWatch(watchId: string, entry: WatchEntry): Promise<void> {
     try {
-      // Fetch the last assistant response
-      const originalSession = this.wireClient.getSessionId();
-      this.wireClient.setSessionId(entry.sessionId);
+      // Fetch the last assistant response using semantic method
+      const blocks = await this.sessionClient.getSessionMessages(entry.sessionId, { pageSize: 5, role: "assistant" });
 
-      const msgsResp = await this.wireClient.apiGet<{ items: Array<{ content: Array<{ type: string; text?: string }> }> }>(
-        `/api/v1/sessions/${entry.sessionId}/messages?page_size=5&role=assistant`
-      );
-
-      this.wireClient.setSessionId(originalSession);
-
-      const items = msgsResp?.items || [];
       // Get text from the last assistant message
       let text = "";
-      for (let i = items.length - 1; i >= 0; i--) {
-        for (const block of items[i].content || []) {
-          if (block.type === "text" && block.text) {
-            text = block.text;
-            break;
-          }
+      for (const block of blocks) {
+        if (block.type === "text" && block.text) {
+          text = block.text; // last text block wins
         }
-        if (text) break;
       }
 
       entry.status = "done";

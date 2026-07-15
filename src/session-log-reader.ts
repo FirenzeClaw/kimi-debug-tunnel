@@ -23,25 +23,154 @@ export function truncateText(text: string, maxLen: number): string {
 /**
  * Sanitize text to prevent downstream JSON serialization issues.
  * - Double-escapes \\xNN and \\uNNNN sequences (backslash hardening)
- *   to survive a potentially buggy downstream JSON serializer that may
- *   fail to re-escape backslashes before embedding content in a JSON string.
  * - Replaces lone surrogates (U+D800-U+DFFF) with U+FFFD
  * - Replaces control characters (U+0000-U+001F except \\t \\n \\r) with spaces
  * - Collapses multiple consecutive spaces from control char replacement
  */
 export function sanitizeText(text: string): string {
   return text
-    // Backslash hardening: \xNN → \\xNN, \uNNNN → \\uNNNN
-    // Negative lookbehind ensures idempotency: already-hardened \\xNN is not re-hardened.
-    // This ensures the content survives at least one missed escape roundtrip:
-    // even if a downstream serializer only escapes the first backslash,
-    // the second backslash keeps the sequence valid in JSON.
     .replace(/(?<!\\)\\x([0-9a-fA-F]{2})/g, "\\\\x$1")
     .replace(/(?<!\\)\\u([0-9a-fA-F]{4})/g, "\\\\u$1")
-    // Character-level sanitization
     .replace(/[\uD800-\uDFFF]/g, "\uFFFD")
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, " ")
     .replace(/ {2,}/g, " ");
+}
+
+// ── Shared wire.jsonl parser (v2.11 — single source of truth) ──────────────────
+
+export interface WireEvent {
+  line: number;
+  type: "turn.prompt" | "tool.call" | "assistant.text" | "step.end" | "other";
+  time: number;
+  turnId?: string;
+  step?: number;
+  // Event-specific payloads
+  promptText?: string;
+  toolName?: string;
+  toolArgs?: Record<string, unknown>;
+  assistantText?: string;
+  finishReason?: string;
+  // Raw entry for edge cases
+  raw: Record<string, unknown>;
+}
+
+/**
+ * Parse a raw wire.jsonl entry into a typed WireEvent.
+ * Centralizes the JSON.shape → event dispatch that was previously
+ * duplicated across readSessionLog, listIORecords, and pollSessionStatus.
+ */
+export function parseWireEvent(line: string, lineNum: number): WireEvent | null {
+  try {
+    const entry = JSON.parse(line);
+    const time = (entry.time as number) || 0;
+    const raw = entry as Record<string, unknown>;
+
+    // turn.prompt
+    if (entry.type === "turn.prompt" && time) {
+      return {
+        line: lineNum,
+        type: "turn.prompt",
+        time,
+        promptText: extractPromptText(raw),
+        raw,
+      };
+    }
+
+    // context.append_loop_event — dispatch on event.type
+    if (entry.type === "context.append_loop_event") {
+      const event = entry.event as Record<string, unknown> | undefined;
+      if (!event) {
+        return { line: lineNum, type: "other", time, raw };
+      }
+
+      const step = event.step as number | undefined;
+
+      if (event.type === "content.part") {
+        const part = event.part as Record<string, string> | undefined;
+        if (part?.type === "text" && part.text) {
+          return {
+            line: lineNum, type: "assistant.text", time,
+            step, turnId: String(time),
+            assistantText: part.text, raw,
+          };
+        }
+      }
+
+      if (event.type === "tool.call") {
+        return {
+          line: lineNum, type: "tool.call", time,
+          step,
+          toolName: event.name as string,
+          toolArgs: event.args as Record<string, unknown> | undefined,
+          raw,
+        };
+      }
+
+      if (event.type === "step.end") {
+        return {
+          line: lineNum, type: "step.end", time,
+          finishReason: event.finishReason as string | undefined,
+          raw,
+        };
+      }
+    }
+
+    // Fallback for other event types (kept for inclusive scanning)
+    return { line: lineNum, type: "other", time, raw };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read wire.jsonl and parse all lines into an array of WireEvent.
+ * Shared by readSessionLog, listIORecords, and pollSessionStatus.
+ *
+ * @param tailOnly - if > 0, only parse the last N lines (used by pollSessionStatus).
+ * @param includeThinking - if true, include "thinking" content.part events as assistant.text.
+ */
+export async function parseWireJsonl(
+  sessionId: string,
+  opts: { tailOnly?: number; includeThinking?: boolean } = {}
+): Promise<{ events: WireEvent[]; totalLines: number } | null> {
+  const { tailOnly = 0, includeThinking = false } = opts;
+  const sessionPath = await findSessionPath(sessionId);
+  if (!sessionPath) return null;
+  const wirePath = join(sessionPath, "agents", "main", "wire.jsonl");
+
+  try {
+    const raw = await readFile(wirePath, "utf-8");
+    const allLines = raw.split("\n").filter((l) => l.trim());
+    const linesToParse = tailOnly > 0 ? allLines.slice(-tailOnly) : allLines;
+    const lineOffset = tailOnly > 0 ? allLines.length - linesToParse.length : 0;
+
+    const events: WireEvent[] = [];
+    for (let i = 0; i < linesToParse.length; i++) {
+      const lineNum = lineOffset + i + 1;
+      const event = parseWireEvent(linesToParse[i], lineNum);
+      if (event) {
+        // For includeThinking: re-dispatch "think" content parts
+        if (!includeThinking && event.type === "other") {
+          // Check if it's a "think" content part we should skip
+          try {
+            const entry = JSON.parse(linesToParse[i]);
+            if (
+              entry.type === "context.append_loop_event" &&
+              entry.event?.type === "content.part" &&
+              entry.event?.part?.type === "think"
+            ) {
+              continue; // Skip thinking when not requested
+            }
+          } catch { /* keep */ }
+        }
+        events.push(event);
+      }
+    }
+
+    return { events, totalLines: allLines.length };
+  } catch {
+    return null;
+  }
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -97,151 +226,87 @@ export async function readSessionLog(
   options: { afterLine?: number; limit?: number; includeThinking?: boolean; maxContentLength?: number } = {}
 ): Promise<SessionLog | null> {
   const { afterLine = 0, limit = 50, includeThinking = false, maxContentLength = 500 } = options;
+  const parsed = await parseWireJsonl(sessionId, { includeThinking });
+  if (!parsed) return null;
+  const { events, totalLines } = parsed;
 
-  const sessionPath = await findSessionPath(sessionId);
-  if (!sessionPath) return null;
+  const entries: LogEntry[] = [];
+  let turnId = "";
+  let lastTurnPrompt: LogEntry | null = null;
+  let lastAssistantText: LogEntry | null = null;
+  let lastToolCalls: string[] = [];
+  let lastTurnComplete = false;
+  let lastTurnFinishReason: string | null = null;
+  const currentTurnToolCalls: string[] = [];
 
-  const wirePath = join(sessionPath, "agents", "main", "wire.jsonl");
+  for (const event of events) {
+    if (event.line <= afterLine) continue;
 
-  try {
-    const raw = await readFile(wirePath, "utf-8");
-    const lines = raw.split("\n").filter((l) => l.trim());
+    let content = "";
+    let entryType: string = event.type;
 
-    const entries: LogEntry[] = [];
-    let turnId = "";
-    let lastTurnPrompt: LogEntry | null = null;
-    let lastAssistantText: LogEntry | null = null;
-    let lastToolCalls: string[] = [];
-    let lastTurnComplete = false;
-    let lastTurnFinishReason: string | null = null;
-
-    const currentTurnToolCalls: string[] = [];
-
-    for (let i = 0; i < lines.length; i++) {
-      const lineNum = i + 1;
-
-      try {
-        const entry = JSON.parse(lines[i]);
-
-        if (entry.type === "turn.prompt" && entry.time) {
-          turnId = String(entry.time);
-          if (lineNum > afterLine) {
-            lastTurnPrompt = {
-              line: lineNum,
-              type: "turn.prompt",
-              content: extractPromptText(entry),
-              time: entry.time,
-              turnId,
-            };
-            lastAssistantText = null;
-            lastToolCalls = [];
-            lastTurnComplete = false;
-            lastTurnFinishReason = null;
-          }
-        }
-
-        if (
-          entry.type === "context.append_loop_event" &&
-          entry.event?.type === "content.part" &&
-          entry.event?.part?.type === "text"
-        ) {
-          if (lineNum > afterLine) {
-            lastAssistantText = {
-              line: lineNum,
-              type: "assistant_text",
-              content: entry.event.part.text,
-              time: entry.time,
-              turnId,
-              step: entry.event.step,
-            };
-          }
-        }
-
-        if (entry.type === "context.append_loop_event" && entry.event?.type === "tool.call") {
-          if (lineNum > afterLine) {
-            currentTurnToolCalls.push(entry.event.name);
-            if (!lastToolCalls.length) {
-              lastToolCalls = [...currentTurnToolCalls];
-            }
-          }
-        }
-
-        if (entry.type === "context.append_loop_event" && entry.event?.type === "step.end") {
-          lastTurnComplete = entry.event.finishReason === "end_turn";
-          lastTurnFinishReason = entry.event.finishReason || null;
-        }
-
-        if (lineNum > afterLine) {
-          let content = "";
-          let entryType = entry.type;
-
-          if (entry.type === "turn.prompt") {
-            content = truncateText(sanitizeText(extractPromptText(entry)), maxContentLength);
-            entryType = "user_prompt";
-          } else if (
-            entry.type === "context.append_loop_event" &&
-            entry.event?.type === "content.part"
-          ) {
-            if (entry.event.part.type === "text") {
-              content = truncateText(sanitizeText(entry.event.part.text), maxContentLength);
-              entryType = "assistant_text";
-            } else if (entry.event.part.type === "think") {
-              if (!includeThinking) continue;
-              content = truncateText(sanitizeText(entry.event.part.think), maxContentLength);
-              entryType = "thinking";
-            } else {
-              continue;
-            }
-          } else if (
-            entry.type === "context.append_loop_event" &&
-            entry.event?.type === "tool.call"
-          ) {
-            content = truncateText(
-              sanitizeText(`${entry.event.name}(${JSON.stringify(entry.event.args || {})})`),
-              200
-            );
-            entryType = "tool_call";
-          } else if (
-            entry.type === "context.append_loop_event" &&
-            entry.event?.type === "step.end"
-          ) {
-            content = `finish: ${entry.event.finishReason || "unknown"}`;
-            entryType = "step_end";
-          } else {
-            continue;
-          }
-
-          entries.push({
-            line: lineNum,
-            type: entryType,
-            content,
-            time: entry.time || 0,
-            turnId,
-            step: entry.event?.step,
-          });
-        }
-      } catch {
-        // Skip unparseable lines
+    switch (event.type) {
+      case "turn.prompt": {
+        turnId = String(event.time);
+        lastTurnPrompt = {
+          line: event.line, type: "turn.prompt",
+          content: sanitizeText(event.promptText || ""),
+          time: event.time, turnId,
+        };
+        lastAssistantText = null;
+        lastToolCalls = [];
+        lastTurnComplete = false;
+        lastTurnFinishReason = null;
+        content = truncateText(sanitizeText(event.promptText || ""), maxContentLength);
+        entryType = "user_prompt";
+        break;
       }
+      case "assistant.text": {
+        lastAssistantText = {
+          line: event.line, type: "assistant_text",
+          content: event.assistantText || "",
+          time: event.time, turnId, step: event.step,
+        };
+        content = truncateText(sanitizeText(event.assistantText || ""), maxContentLength);
+        entryType = "assistant_text";
+        break;
+      }
+      case "tool.call": {
+        currentTurnToolCalls.push(event.toolName || "unknown");
+        if (!lastToolCalls.length) lastToolCalls = [...currentTurnToolCalls];
+        content = truncateText(
+          sanitizeText(`${event.toolName || "?"}(${JSON.stringify(event.toolArgs || {})})`),
+          200
+        );
+        entryType = "tool_call";
+        break;
+      }
+      case "step.end": {
+        lastTurnComplete = event.finishReason === "end_turn";
+        lastTurnFinishReason = event.finishReason || null;
+        content = `finish: ${event.finishReason || "unknown"}`;
+        entryType = "step_end";
+        break;
+      }
+      default:
+        continue; // skip untyped/thinking events
     }
 
-    const recentEntries = afterLine === 0
-      ? entries.slice(0, limit)
-      : entries.slice(-limit);
-
-    return {
-      sessionId,
-      totalLines: lines.length,
-      recentEntries,
-      lastTurnPrompt,
-      lastAssistantText,
-      lastToolCalls,
-      lastTurnComplete,
-      lastTurnFinishReason,
-    };
-  } catch {
-    return null;
+    entries.push({
+      line: event.line, type: entryType, content,
+      time: event.time, turnId, step: event.step,
+    });
   }
+
+  const recentEntries = afterLine === 0
+    ? entries.slice(0, limit)
+    : entries.slice(-limit);
+
+  return {
+    sessionId, totalLines, recentEntries,
+    lastTurnPrompt, lastAssistantText, lastToolCalls,
+    lastTurnComplete, lastTurnFinishReason,
+  };
 }
 
 // ── IO records ─────────────────────────────────────────────────────────────────
@@ -251,161 +316,105 @@ export async function listIORecords(
   options: { limit?: number; maxContentLength?: number } = {}
 ): Promise<IORecordsResult | null> {
   const { limit = 40, maxContentLength = 2000 } = options;
+  const parsed = await parseWireJsonl(sessionId);
+  if (!parsed) return null;
+  const { events } = parsed;
 
-  const sessionPath = await findSessionPath(sessionId);
-  if (!sessionPath) return null;
+  const records: IORecord[] = [];
+  let turnIndex = 0;
+  let stepCount = 0;
+  let lastAssistantText = "";
 
-  const wirePath = join(sessionPath, "agents", "main", "wire.jsonl");
-
-  try {
-    const raw = await readFile(wirePath, "utf-8");
-    const lines = raw.split("\n").filter((l) => l.trim());
-
-    const records: IORecord[] = [];
-    let turnIndex = 0;
-    let stepCount = 0;
-    let lastAssistantText = "";
-
-    for (const line of lines) {
-      try {
-        const entry = JSON.parse(line);
-
-        if (entry.type === "turn.prompt" && entry.time) {
-          if (lastAssistantText) {
-            records.push({
-              turn: turnIndex,
-              type: "assistant",
-              content: truncateText(sanitizeText(lastAssistantText), maxContentLength),
-              time: 0,
-              stepCount,
-            });
-            lastAssistantText = "";
-          }
-
-          turnIndex++;
-          stepCount = 0;
-
-          const prompt = sanitizeText(extractPromptText(entry));
-          records.push({
-            turn: turnIndex,
-            type: "user",
-            content: truncateText(prompt, maxContentLength),
-            time: entry.time,
-          });
-        }
-
-        if (entry.type === "context.append_loop_event") {
-          if (entry.event?.type === "content.part" && entry.event?.part?.type === "text") {
-            lastAssistantText = entry.event.part.text;
-          }
-          if (entry.event?.type === "tool.call") {
-            stepCount++;
-          }
-        }
-      } catch {
-        // skip
+  for (const event of events) {
+    if (event.type === "turn.prompt") {
+      if (lastAssistantText) {
+        records.push({
+          turn: turnIndex, type: "assistant",
+          content: truncateText(sanitizeText(lastAssistantText), maxContentLength),
+          time: 0, stepCount,
+        });
+        lastAssistantText = "";
       }
-    }
-
-    if (lastAssistantText) {
+      turnIndex++;
+      stepCount = 0;
       records.push({
-        turn: turnIndex,
-        type: "assistant",
-        content: truncateText(sanitizeText(lastAssistantText), maxContentLength),
-        time: 0,
-        stepCount,
+        turn: turnIndex, type: "user",
+        content: truncateText(sanitizeText(event.promptText || ""), maxContentLength),
+        time: event.time,
       });
     }
-
-    return {
-      sessionId,
-      totalTurns: turnIndex,
-      records: records.slice(-limit),
-    };
-  } catch {
-    return null;
+    if (event.type === "assistant.text") {
+      lastAssistantText = event.assistantText || "";
+    }
+    if (event.type === "tool.call") {
+      stepCount++;
+    }
   }
+
+  if (lastAssistantText) {
+    records.push({
+      turn: turnIndex, type: "assistant",
+      content: truncateText(sanitizeText(lastAssistantText), maxContentLength),
+      time: 0, stepCount,
+    });
+  }
+
+  return { sessionId, totalTurns: turnIndex, records: records.slice(-limit) };
 }
 
 // ── Status polling ─────────────────────────────────────────────────────────────
 
 export async function pollSessionStatus(sessionId: string): Promise<SessionStatus | null> {
-  const sessionPath = await findSessionPath(sessionId);
-  if (!sessionPath) return null;
+  const parsed = await parseWireJsonl(sessionId, { tailOnly: 20 });
+  if (!parsed) return null;
+  const { events, totalLines } = parsed;
 
-  const wirePath = join(sessionPath, "agents", "main", "wire.jsonl");
+  let isAwaiting = false;
+  let hasError = false;
+  let inSwarm = false;
+  let lastTurn = 0;
+  let toolCallsInTurn = 0;
+  let lastEndTurnIdx = -1;
+  let lastTurnPromptIdx = -1;
+  let lastToolCallIdx = -1;
 
-  try {
-    const raw = await readFile(wirePath, "utf-8");
-    const allLines = raw.split("\n").filter((l) => l.trim());
-    const tailSize = Math.min(allLines.length, 20);
-    const recentLines = allLines.slice(-tailSize);
-
-    let isAwaiting = false;
-    let hasError = false;
-    let inSwarm = false;
-    let lastTurn = 0;
-    let toolCallsInTurn = 0;
-    // Track the line index of the most recent critical events
-    let lastEndTurnIdx = -1;
-    let lastTurnPromptIdx = -1;
-    let lastToolCallIdx = -1;
-
-    for (let i = 0; i < recentLines.length; i++) {
-      try {
-        const entry = JSON.parse(recentLines[i]);
-        const type = entry.type || "";
-        // Map recent index back to actual line number
-        const actualIdx = allLines.length - tailSize + i;
-
-        if (type === "turn.prompt") { lastTurn++; lastTurnPromptIdx = actualIdx; }
-        if (type.includes("awaiting_approval")) isAwaiting = true;
-        if (type === "context.append_loop_event") {
-          const eventType = entry.event?.type || "";
-          if (eventType === "step.end" && entry.event?.finishReason === "end_turn") {
-            lastEndTurnIdx = actualIdx;
-          }
-          if (eventType === "tool.call") { lastToolCallIdx = actualIdx; toolCallsInTurn++; }
-        }
-        if (type.includes("error")) hasError = true;
-        if (JSON.stringify(entry).includes("swarm")) inSwarm = true;
-      } catch { /* skip */ }
+  for (const event of events) {
+    if (event.type === "turn.prompt") { lastTurn++; lastTurnPromptIdx = event.line; }
+    if (event.type === "step.end" && event.finishReason === "end_turn") {
+      lastEndTurnIdx = event.line;
     }
+    if (event.type === "tool.call") { lastToolCallIdx = event.line; toolCallsInTurn++; }
 
-    let state: SessionStatus["state"];
-    const alerts: string[] = [];
-
-    // Priority order: awaiting_approval > done > swarm > active > error > idle
-    if (isAwaiting) {
-      state = "awaiting_approval";
-      alerts.push("Session 等待工具审批 — auto_mode 可能未生效");
-    } else if (lastEndTurnIdx > lastTurnPromptIdx && lastEndTurnIdx >= 0) {
-      // end_turn happened after the last turn.prompt → turn is truly done
-      state = "done";
-    } else if (lastEndTurnIdx >= 0 && lastTurnPromptIdx < 0) {
-      // first turn, end_turn detected but no follow-up turn.prompt → done
-      state = "done";
-    } else if (inSwarm) {
-      state = "swarm";
-    } else if (lastToolCallIdx >= 0 && lastToolCallIdx > lastEndTurnIdx && lastToolCallIdx > lastTurnPromptIdx) {
-      state = "active";
-    } else if (hasError) {
-      state = "error";
-      alerts.push("检测到错误条目");
-    } else {
-      state = "idle";
-    }
-
-    return {
-      sessionId,
-      state,
-      totalLines: allLines.length,
-      lastTurn,
-      toolCallsInTurn,
-      complete: state === "done",
-      alerts,
-    };
-  } catch {
-    return null;
+    // Check raw for awaiting/error/swarm — these don't have dedicated WireEvent types
+    const typeStr = (event.raw.type as string) || "";
+    if (typeStr.includes("awaiting_approval")) isAwaiting = true;
+    if (typeStr.includes("error")) hasError = true;
+    if (JSON.stringify(event.raw).includes("swarm")) inSwarm = true;
   }
+
+  let state: SessionStatus["state"];
+  const alerts: string[] = [];
+
+  if (isAwaiting) {
+    state = "awaiting_approval";
+    alerts.push("Session 等待工具审批 — auto_mode 可能未生效");
+  } else if (lastEndTurnIdx > lastTurnPromptIdx && lastEndTurnIdx >= 0) {
+    state = "done";
+  } else if (lastEndTurnIdx >= 0 && lastTurnPromptIdx < 0) {
+    state = "done";
+  } else if (inSwarm) {
+    state = "swarm";
+  } else if (lastToolCallIdx >= 0 && lastToolCallIdx > lastEndTurnIdx && lastToolCallIdx > lastTurnPromptIdx) {
+    state = "active";
+  } else if (hasError) {
+    state = "error";
+    alerts.push("检测到错误条目");
+  } else {
+    state = "idle";
+  }
+
+  return {
+    sessionId, state, totalLines, lastTurn, toolCallsInTurn,
+    complete: state === "done", alerts,
+  };
 }

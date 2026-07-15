@@ -1,33 +1,37 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { TunnelServices } from "./types.js";
-
-import { registerListSessions } from "./tools/list-sessions.js";
-import { registerGetSessionInfo } from "./tools/get-session-info.js";
-import { registerGetTunnelStatus } from "./tools/get-tunnel-status.js";
-import { registerReadSessionLog } from "./tools/read-session-log.js";
-import { registerExecutePrompt } from "./tools/execute-prompt.js";
-import { registerChatWithSession } from "./tools/chat-with-session.js";
-import { registerStreamResponse } from "./tools/stream-response.js";
-import { registerListIORecords } from "./tools/list-io-records.js";
-import { registerCreateSession } from "./tools/create-session.js";
-import { registerPollSession } from "./tools/poll-session.js";
-import { registerRunFlow } from "./tools/run-flow.js";
-import { registerLearnWorkflow } from "./tools/learn-workflow.js";
-import { registerExecuteWorkflow } from "./tools/execute-workflow.js";
-import { registerListTemplates } from "./tools/list-workflow-templates.js";
-import { registerContinueWorkflow } from "./tools/continue-workflow.js";
-import { registerWatchSession, registerGetWatchResult, registerContinueWatch, registerSetWatchOutput } from "./tools/session-watch.js";
-import { registerListPolicies } from "./tools/list-policies.js";
-import { registerApproveTool } from "./tools/approve-tool.js";
-import { registerDenyTool } from "./tools/deny-tool.js";
-import { registerMemorySet } from "./tools/memory-set.js";
-import { registerMemoryGet } from "./tools/memory-get.js";
-import { registerMemoryList } from "./tools/memory-list.js";
-import { registerMemoryDelete } from "./tools/memory-delete.js";
-import { registerMemoryStatus } from "./tools/memory-status.js";
-import { registerMemoryArchive } from "./tools/memory-archive.js";
-import { registerGradeStep } from "./tools/grade-step.js";
+import {
+  registerCreateSession,
+  registerExecutePrompt,
+  registerChatWithSession,
+  registerRunFlow,
+  registerStreamResponse,
+  registerListSessions,
+  registerGetSessionInfo,
+  registerReadSessionLog,
+  registerListIORecords,
+  registerPollSession,
+  registerLearnWorkflow,
+  registerListTemplates,
+  registerExecuteWorkflow,
+  registerContinueWorkflow,
+  registerWatchSession,
+  registerGetWatchResult,
+  registerContinueWatch,
+  registerSetWatchOutput,
+  registerGetTunnelStatus,
+  registerListPolicies,
+  registerApproveTool,
+  registerDenyTool,
+  registerMemorySet,
+  registerMemoryGet,
+  registerMemoryList,
+  registerMemoryDelete,
+  registerMemoryStatus,
+  registerMemoryArchive,
+  registerGradeStep,
+} from "./tools/manifest.js";
 
 export async function startMcpServer(services: TunnelServices): Promise<void> {
   const server = new McpServer({

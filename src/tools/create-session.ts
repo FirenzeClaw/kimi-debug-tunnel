@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { TunnelServices } from "../types.js";
-import { ensureConnected } from "./helpers.js";
+import { ensureConnected, setMemoryProfileWithExpiry } from "./helpers.js";
 
 export function registerCreateSession(server: McpServer, services: TunnelServices): void {
   const { wireClient, orchestrationStore } = services;
@@ -53,7 +53,7 @@ export function registerCreateSession(server: McpServer, services: TunnelService
       }
 
       try {
-        const pmSessionId = wireClient.getSessionId();
+        const pmSessionId = wireClient.getPmSessionId();
         const result = await wireClient.createSession({
           cwd,
           title,
@@ -66,8 +66,6 @@ export function registerCreateSession(server: McpServer, services: TunnelService
         if (pmSessionId && orchestrationStore) {
           orchestrationStore.recordChildCreation(pmSessionId, cwd, result.sessionId, cwd);
         }
-
-        wireClient.setSessionId(result.sessionId);
 
         // Bind policy if specified
         if (policy) {
@@ -82,30 +80,10 @@ export function registerCreateSession(server: McpServer, services: TunnelService
         }
 
         // Bind memory profile if level != "off" (SPEC 002)
-        if (memory_level !== "off" && services.memoryStore && services.tunnelProjectRoot) {
-          try {
-            services.memoryStore.ensureDb(services.tunnelProjectRoot);
-            // Check for expired entries in relevant namespaces
-            const nsToCheck = memory_level === "minimal"
-              ? ["project/meta"]
-              : memory_level === "standard"
-              ? ["project/meta", "project/decisions"]
-              : ["project/meta", "project/decisions", "project/risks", "project/learnings"];
-            let hasExpired = false;
-            for (const ns of nsToCheck) {
-              const entries = services.memoryStore.get(ns);
-              if (entries.some((e) => e.expired)) { hasExpired = true; break; }
-            }
-            services.memoryStore.setMemoryProfile(result.sessionId, {
-              level: memory_level,
-              cwd,
-              fromSession: from_session,
-              hasExpiredEntries: hasExpired,
-            });
-          } catch {
-            // Memory store setup failure is non-fatal; session creation succeeds anyway
-          }
-        }
+        setMemoryProfileWithExpiry(
+          services.memoryStore, services.tunnelProjectRoot, result.sessionId,
+          { level: memory_level, cwd, fromSession: from_session }
+        );
 
         return {
           content: [

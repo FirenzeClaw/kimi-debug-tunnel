@@ -8,27 +8,18 @@ import type {
   CreateSessionOptions,
 } from "./wire-client.js";
 
-// === Wire Client Interface (v2.10 — extracted from WireClient for testability) ===
+// === Wire Client Interfaces (v2.11 — split from 20-method monolith into 3 focused interfaces) ===
 
-export interface IWireClient {
-  // Connection
-  isConnected(): boolean;
-  isWsConnected(): boolean;
-  connect(): Promise<void>;
-  close(): Promise<void>;
-  startHealthCheck(): void;
-
-  // Session management
-  getSessionId(): string;
-  setSessionId(id: string): void;
+/** Session lifecycle + prompt submission — used by tools that create/manage sessions. */
+export interface ISessionClient {
   createSession(opts: CreateSessionOptions): Promise<{ sessionId: string; title: string }>;
-
-  // Prompt submission
   submitPrompt(
+    sessionId: string,
     prompt: string,
     opts?: { autoApprove?: boolean }
   ): Promise<{ promptId: string }>;
   sendPrompt(
+    sessionId: string,
     prompt: string,
     opts?: {
       timeoutMs?: number;
@@ -36,27 +27,51 @@ export interface IWireClient {
       autoApprove?: boolean;
     }
   ): Promise<TurnPromptResponse>;
-
-  // Status
-  getSessionStatus(): Promise<string>;
-  getCachedStatus(sessionId: string): string | null;
-
-  // Policy
   setSessionPolicy(sessionId: string, policySpec: string, cwd?: string, boundBy?: string): void;
 
-  // REST access (used by SessionWatcher, WorkflowEngine for message fetching)
-  apiGet<T>(path: string): Promise<T>;
-  apiPost<T>(path: string, body: unknown): Promise<T>;
+  // Semantic methods replacing raw apiGet/apiPost (v2.11)
+  /** Fetch session messages — replaces apiGet("/api/v1/sessions/SID/messages?...") */
+  getSessionMessages(
+    sessionId: string,
+    opts?: { pageSize?: number; role?: string }
+  ): Promise<KimiContentBlock[]>;
+  /** Resolve an approval — replaces apiPost("/api/v1/sessions/SID/approvals/AID", ...) */
+  resolveApproval(
+    sessionId: string,
+    approvalId: string,
+    action: "approved" | "rejected",
+    reason?: string
+  ): Promise<void>;
 
   // Utility
   getThinkingFromMessages(messages: KimiContentBlock[]): string;
   filterTextOnly(messages: KimiContentBlock[]): KimiContentBlock[];
 
-  // Dependency injection
+  /** PM session ID for orchestration tracking (read-only, no mutation). */
+  getPmSessionId(): string;
+}
+
+/** Session status queries — used by monitoring tools. */
+export interface IStatusClient {
+  getSessionStatus(sessionId: string): Promise<string>;
+  getCachedStatus(sessionId: string): string | null;
+}
+
+/** Wire lifecycle + push events — used by index.ts and session-watcher. */
+export interface IPushClient {
+  isConnected(): boolean;
+  isWsConnected(): boolean;
+  connect(): Promise<void>;
+  close(): Promise<void>;
+  startHealthCheck(): void;
   setMessageQueue(mq: MessageQueue): void;
   setPolicyEngine(pe: IPolicyEngine): void;
   setWatchOutput(path: string): void;
 }
+
+// === Backward-compatible composite (v2.11) ===
+
+export interface IWireClient extends ISessionClient, IStatusClient, IPushClient {}
 
 // === Workflow Types ===
 
@@ -132,10 +147,15 @@ export interface IMemoryStore {
 // === Tunnel Services ===
 
 export interface TunnelServices {
+  // v2.11: split interfaces (preferred for new code)
+  sessionClient: ISessionClient;
+  statusClient: IStatusClient;
+  pushClient: IPushClient;
+  // Backward compat alias
   wireClient: IWireClient;
   messageQueue: MessageQueue;
   startTime: number;
-  workflowEngine?: IWorkflowEngine;
+  workflowEngine: IWorkflowEngine;
   policyEngine?: IPolicyEngine;
   memoryStore?: IMemoryStore;
   orchestrationStore?: OrchestrationStore;
