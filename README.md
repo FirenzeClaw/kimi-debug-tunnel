@@ -7,7 +7,7 @@
 [![Node](https://img.shields.io/badge/node-%E2%89%A5%2022-339933)]()
 [![Python](https://img.shields.io/badge/python-%E2%89%A5%203.7-3776AB)]()
 [![MCP Tools](https://img.shields.io/badge/MCP%20tools-29-orange)]()
-[![Skills](https://img.shields.io/badge/skills-7-blue)]()
+[![Skills](https://img.shields.io/badge/skills-10-blue)]()
 
 **Kimi Code CLI 的 Loop Engineering PM 编排系统。** 29 个 MCP 工具——不手动 prompt Agent，而是设计自动 prompt Agent 的循环系统。
 
@@ -98,12 +98,15 @@ npm start
 
 ## Skill
 
-7 个配套 skill，分为 Agent 级（新 session 自动加载）和 PM 级（按需调用）：
+10 个配套 skill，分为 Agent 级（新 session 自动加载）和 PM 级（按需调用）：
 
 | Skill | 级别 | 一句话 |
 |-------|:--:|------|
 | `kimi-session-orchestrator` | Agent | 启动协议：auto 检测 → Q1 角色维度 → 按需加载 guide |
 | `loop-orchestrator` | PM | `/loop-orchestrator` 一键启动 6 阶段自主循环 |
+| `loop-contract-from-docs` | PM | 从 SPEC/PRD/PLAN/TASK 提取 AC、复杂度和 Loop Contract |
+| `loop-contract-from-idea` | PM | 一句话需求 → 5 轮追问 → 基线锁定 → Loop Contract |
+| `cron-scheduler` | PM | 定时自动化编排：cron.yaml 双写、自举续期链、run_lock 防重叠 |
 | `session-retire` | PM | 退役→接班全自动 pipeline，近乎无损接力 |
 | `xmind-orchestrated` | Agent | 困境分析——task session 独立上下文 + 零污染 |
 | `xmind` | Agent | 本地子 Agent 困境分析（原版） |
@@ -123,6 +126,9 @@ cp skills/mcp-async-tool.md ~/.agents/skills/mcp-async-tool/SKILL.md
 # PM 级
 cp -r skills/session-retire ~/.kimi-code/skills/
 cp -r skills/loop-orchestrator ~/.kimi-code/skills/
+cp -r skills/loop-contract-from-docs ~/.kimi-code/skills/
+cp -r skills/loop-contract-from-idea ~/.kimi-code/skills/
+cp -r skills/cron-scheduler ~/.kimi-code/skills/
 ```
 
 ## 记忆系统
@@ -150,8 +156,9 @@ L3: 学习沉淀 (learn skill → 向量库)
 | [API.md](API.md) | Kimi Server REST API（51 端点） |
 | [docs/coordinator-guide.md](docs/coordinator-guide.md) | PM 统筹准入规范 |
 | [docs/loop-engineering-analysis.md](docs/loop-engineering-analysis.md) | Loop Engineering 概念与项目对照 |
-| [specs/](specs/) | 5 个功能规格（001-005） |
-| [docs/superpowers/specs/](docs/superpowers/specs/) | 架构设计文档 |
+| [docs/loop-engineering-reference.md](docs/loop-engineering-reference.md) | Loop Engineering 全面参考（16 章，7 篇来源聚合） |
+| [specs/](specs/) | 7 个功能规格（001-007，含 cross-model grader 与 cron-scheduler） |
+| [docs/superpowers/specs/](docs/superpowers/specs/) | 架构设计文档（含 Loop Contract 双 Skill 设计） |
 | [docs/issues/](docs/issues/) | 已修复问题记录（5 个） |
 
 ## 安装与部署
@@ -193,7 +200,7 @@ src/          — TypeScript 核心（index, mcp-server, wire-client, workflow-e
 shared/       — 浏览器端 JS（API 客户端、状态管理、渲染、注入）
 ext/          — Chrome MV3 扩展
 userscript/   — Tampermonkey 用户脚本
-skills/       — 7 个配套 Skill
+skills/       — 10 个配套 Skill（含 Loop Contract 双 Skill + cron-scheduler）
 templates/    — 工作流 YAML 模板
 docs/         — 规格、设计文档、问题记录
 specs/        — 功能规格（001-005）

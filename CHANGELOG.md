@@ -4,6 +4,14 @@ All notable changes to kimi-session-orchestrator.
 
 ## v2.16 — 2026-07-16
 
+**Loop Engineering skill 套件 + Cron 调度规范**
+
+- 新增 `docs/loop-engineering-reference.md`：16 章 Loop Engineering 全面参考，聚合 7 篇行业来源并补本项目成熟度对照
+- 新增 SPEC 006 `cross-model-grader`：`grade_step` 支持 maker/checker 模型分离，推荐 deepseek-v4-pro + gpt-5.5 交叉评分
+- 新增 SPEC 007 `cron-scheduler-skill`：`cron.yaml` 文件+memory 双写、`run_lock` 防重叠、`one-shot-chain` 续期、`external_actions` 外部副作用门控
+- 新增 PM 级 skill：`loop-contract-from-docs`、`loop-contract-from-idea`、`cron-scheduler`
+- Loop Contract 共享模板补齐 `operational_brakes`、`harness`、12 项 QA 门控和 `<must-differ-from-pm-model>` 交叉验证占位
+
 **Poll Command 预置脚本 + 降级 + 固定路径结果文件**
 
 - `poll-command.ts`: 提取 `POLL_SCRIPT` 模块级常量；`generatePollCommand()` 新增 `existsSync(~/.kimi-tunnel/poll.py)` 检测 —— 存在则返回短命令 `python3 ~/.kimi-tunnel/poll.py <args>`（~100 bytes），不存在降级为内联脚本（行为不变）

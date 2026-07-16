@@ -1,5 +1,6 @@
 <!--
 修改记录（最近 — 完整历史见 CHANGELOG.md）:
+  2026-07-16 | kimi-code (docs) | Loop Engineering skill 文档同步：新增 loop-contract-from-docs/from-idea、cron-scheduler 三个 PM 级 skill；SPEC 006/007；Loop Contract 模板补 operational_brakes+harness；cron 模板补 run_lock+one-shot renewal+external_actions
   2026-07-16 | kimi-code (feat) | v2.16 预置脚本 + 降级回调：POLL_SCRIPT 常量 + existsSync 短命令分支（~/.kimi-tunnel/poll.py 存在时 ~4KB→~100 bytes）；execute_prompt/chat_with_session 自动 writeFile 写 poll.py，失败降级不阻塞；fetch_result 新增 poll-result-{sid}.txt 固定路径结果文件（PM Read 零 token）；路径 Win/Linux 规范化
   2026-07-16 | kimi-code (fix) | poll-command Bash→Python 重写（v2.15）：消除 node 依赖（换 Python json.load 读锁），新增 LOCK_LOST 重试（5×3s → exit 4），修复子 shell 变量丢失（单 Python 进程），退出码扩展为 0/2/3/4；shell wrapper 缩减为 1 行
   2026-07-16 | kimi-code (feat) | 上下文长度 Bash 监控 + Session 规范统一（v2.14）：poll-command 新增 parse_context() + CTX_HIGH_THRESHOLD 三级阈值（环境变量 > ~/.kimi-tunnel/ctx-threshold > 36000）；逐条注入/session 复用优先/context_tokens 监控三条铁律收敛到 2 个 SKILL.md 入口，4 个 sub-guide 冗余清扫；session-retire cwd 修正跨项目场景（cwd=退役 session 实际工作目录，非 projectRoot）
@@ -254,6 +255,8 @@ manual session 的工具调用由 PM 手动决策，流程：
 | `API.md` | Kimi Server REST API 完整参考（51 端点） |
 | `docs/coordinator-guide.md` | **统筹 Session 准入规范（PM视角 v2.8）**——角色定位、工作分解、注意力管理、Skill调度、越权控制、红线 |
 | `docs/loop-engineering-analysis.md` | Loop Engineering 概念调研与项目对照——四层循环堆栈/三级 Agent Loop/逐项对齐/差距与改进方向 |
+| `docs/loop-engineering-reference.md` | Loop Engineering 全面参考——16 章、7 篇行业来源聚合 + 本项目成熟度对照 |
+| `docs/superpowers/specs/2026-07-16-loop-contract-skills-design.md` | Loop Contract 双 Skill 设计——from-docs/from-idea 共享模板与 12 项 QA 门控 |
 | `specs/001-adaptive-workflow-engine/` | 自适应工作流引擎——已实施 |
 | `specs/002-session-memory-share/` | [DONE] Session 冷启动记忆共享——三层内存架构（MemoryStore + 6 MCP 工具 + 自动注入） |
 | `specs/003-permission-policy/` | [DONE] 权限与策略管理——read-only/safe-edit/full-access + 自定义YAML策略 |
@@ -265,15 +268,20 @@ manual session 的工具调用由 PM 手动决策，流程：
 | `docs/issues/mcp-wire-offline-freeze.md` | [FIXED] MCP 进程在 Kimi Server 离线时假死——stdio 优先启动 |
 | `specs/004-memory-lazy-inject/` | [DONE] 记忆注入策略升级——全量预载 → 索引+按需自读（minimal/standard/full 三级格式） |
 | `specs/005-web-ui-extension/` | 浏览器扩展+JS脚本双版本——废弃独立HTML监控，注入Kimi Web UI侧边栏 |
+| `specs/006-cross-model-grader/` | Cross-model grader——grade_step maker/checker 模型分离 |
+| `specs/007-cron-scheduler-skill/` | Cron scheduler skill——cron.yaml 双写 + run_lock + one-shot 续期链 |
 
 ## Agent Skills
 
-本项目配套 7 个 skill，安装后自动生效：
+本项目配套 10 个 skill，安装后自动生效：
 
 | Skill | 用途 | 文件 | 安装位置 |
 |-------|------|------|---------|
 | `kimi-session-orchestrator` | MCP 工具完整使用规范——按角色维度加载对应指南，按需 Read 以节省 token | `skills/kimi-session-orchestrator/SKILL.md` | `~/.agents/skills/` |
 | `loop-orchestrator` | PM | Loop Engineering 自主编排——独立 skill。用户给定目标后 PM 全权统筹循环，里程碑汇报，不降级目标。`/loop-orchestrator` 激活 | `skills/loop-orchestrator/SKILL.md` | `~/.kimi-code/skills/` |
+| `loop-contract-from-docs` | PM | 从 SPEC/PRD/PLAN/TASK 提取 AC、复杂度和 Loop Contract，12 项 QA 硬门 | `skills/loop-contract-from-docs/SKILL.md` | `~/.kimi-code/skills/` |
+| `loop-contract-from-idea` | PM | 一句话需求 → 5 轮追问 → 基线锁定 → Loop Contract | `skills/loop-contract-from-idea/SKILL.md` | `~/.kimi-code/skills/` |
+| `cron-scheduler` | PM | 定时自动化编排：cron.yaml 双写、run_lock 防重叠、one-shot 续期链 | `skills/cron-scheduler/SKILL.md` | `~/.kimi-code/skills/` |
 | `agent-session-monitor` | 通过 wire.jsonl 尾部日志推断 session 运行状态（无需 API 认证） | `skills/agent-session-monitor.md` | `~/.agents/skills/` |
 | `mcp-async-tool` | MCP 异步工具设计模式——解决 >30s 任务被协议超时截断的问题 | `skills/mcp-async-tool.md` | `~/.agents/skills/` |
 | `session-retire` | **PM 专用**——退役 task session + 自动化接班 pipeline：归档记忆 → 提取上下文 → 创建接班 session → 注入 7-block 模板 → 新 session 自举 | `skills/session-retire/SKILL.md` | `~/.kimi-code/skills/` |
@@ -295,4 +303,9 @@ cp -r skills/session-retire ~/.kimi-code/skills/session-retire
 # PM 级 skill — Loop Orchestrator
 rm -rf ~/.kimi-code/skills/loop-orchestrator
 cp -r skills/loop-orchestrator ~/.kimi-code/skills/loop-orchestrator
+
+# PM 级 skill — Loop Contract + Cron Scheduler
+cp -r skills/loop-contract-from-docs ~/.kimi-code/skills/loop-contract-from-docs
+cp -r skills/loop-contract-from-idea ~/.kimi-code/skills/loop-contract-from-idea
+cp -r skills/cron-scheduler ~/.kimi-code/skills/cron-scheduler
 ```
