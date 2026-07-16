@@ -43,13 +43,15 @@ description: Use when retiring a task session and spawning a successor with full
    ⚠️ workdir 字段是 Kimi Code 内部标识符（如 cli-research/2ffc9873b6c1），
    不是绝对路径。不要用它作为 create_session 的 cwd。
 
-   确定接班 session 的 cwd——必须用退役 session 实际工作的目录：
-   - 从 list_io_records / read_session_log 中提取文件路径推断（如 D:/code/cli-research/mycli/src/... → D:/code/cli-research/mycli）
-   - 若 PM 记得创建该 session 时指定的 cwd → 直接使用
-   - 若退役 session 在子项目路径下（不同于 PM session 的 cwd）→ 子项目路径才是正确 cwd
-   - ⛔ 不要用 PM session 自身 cwd 或 memory_status 的 projectRoot —— 那是统筹项目，不是任务项目
-   - ⛔ 不要用项目根目录（如 D:/code/cli-research）替代任务工作目录（如 D:/code/cli-research/mycli）
-   - v2.13+ 双层记忆注入自动按 cwd 选择正确的 memory.db，无需手动指定项目根
+   接班 cwd 规则：**直接复制退役 session 的 cwd，不推导、不"向上"、不替换。**
+   - 方法：list_io_records 第一条 prompt 通常含路径（如"项目 D:/code/cli-research/mycli"），
+     或 read_session_log 中第一条 turn.prompt 的文本里找绝对路径
+   - 若退役 session 在 D:/code/cli-research → 接班 cwd = D:/code/cli-research（不是 D:/code）
+   - 若退役 session 在 D:/code/cli-research/mycli → 接班 cwd = D:/code/cli-research/mycli（不是 D:/code/cli-research）
+   - ⛔ 禁止用 PM session cwd —— PM 在统筹项目，不在任务项目
+   - ⛔ 禁止用 memory_status.projectRoot —— 那是顶层，不是任务目录
+   - ⛔ 禁止用 get_session_info.workdir —— 那是 Kimi Code 内部标识符，非绝对路径
+   - v2.13+ 双层记忆注入自动按 cwd 选正确的 memory.db
 
 ② list_io_records(session_id="<retiring_id>", limit=15, max_content_length=3000)
    → 最近 15 轮 prompt↔回复，用于提取已完成/待办/决策 + **推断退役 session 的实际 cwd**
@@ -120,7 +122,7 @@ description: Use when retiring a task session and spawning a successor with full
 
 ```
 ⑦ create_session(
-     cwd="<退役 session 实际工作的目录>",  ← 从 Phase 1 推断的实际 cwd，不是 PM session cwd，不是 projectRoot
+     cwd="<退役 session 的 cwd，直接复制，不推导>",  ← 从 Phase 1 获取，一字不改
      permission_mode="auto",
      memory_level="full",
      from_session="<retiring_id>"
