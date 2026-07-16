@@ -374,14 +374,16 @@ cp -r skills/loop-orchestrator ~/.kimi-code/skills/loop-orchestrator
 
 ### 共享记忆（v2.5+）
 
-| 工具 | 描述 |
-|------|------|
-| `memory_set` | 写入键值对到命名空间，自动版本递增 |
-| `memory_get` | 读取条目，支持 namespace/key 过滤 + 过期条目 |
-| `memory_list` | 列出命名空间键名（前缀匹配） |
-| `memory_delete` | 删除指定条目 |
-| `memory_status` | 知识库全景：条目数、命名空间分布、最后更新 |
-| `memory_archive` | 将 session L2 findings 归档为 L1 learnings |
+| 工具 | 描述 | 关键参数 |
+|------|------|----------|
+| `memory_set` | 写入键值对到命名空间，自动版本递增 | `namespace`, `key`, `value`, `project`（可选） |
+| `memory_get` | 读取条目，支持 namespace/key 过滤 + 过期条目 | `namespace`, `key`（可选）, `project`（可选） |
+| `memory_list` | 列出命名空间键名（前缀匹配） | `namespace`（可选）, `project`（可选） |
+| `memory_delete` | 删除指定条目 | `namespace`, `key` |
+| `memory_status` | 知识库全景：条目数、命名空间分布、最后更新 | `project`（可选） |
+| `memory_archive` | 将 session L2 findings 归档为 L1 learnings | `session_id`, `project`（可选） |
+
+> **v2.13 `project` 参数**：可选指定目标项目的绝对路径，用于跨项目记忆路由。不加时行为不变，走默认 tunnel DB。详见 `skills/kimi-session-orchestrator/guide-cross-project-memory.md`。
 
 > **v2.6 注入策略**：`create_session(memory_level)` 自动注入**记忆索引**（命名空间 + 键名 + 读取建议），task session 首 turn 自主调用 `memory_get` 按需拉取。注入文本从 ~600B 降至 ~200B。
 
@@ -717,6 +719,7 @@ npm start
 
 | 日期 | 版本 | 变更 |
 |------|:--:|------|
+| 2026-07-16 | v2.13 | **跨项目记忆双层注入**：`buildInjection()` 消费 `profile.cwd` 生成双层注入（全局正文 + 子项目索引导航表）；6 个 `memory_*` MCP 工具添加 `project` 可选参数支持跨项目 DB 路由，`else` 分支防状态泄漏 + `resolveProjectRoot` 守卫；skill Q1b + `guide-cross-project-memory.md` 新建；Server 断联恢复规范部署到 8 个 skill 文件；README 架构图/项目结构/行业痛点对照更新 |
 | 2026-07-16 | v2.12.3 | **MCP 去歧义 + 断连恢复 + 轮询动态端口**：① `buildInjection()` 注入 ⛔ 前缀指定 `kimi-session-orchestrator` MCP——修复 task session 调错 `memory` 知识图谱 MCP 同名工具；② loop-orchestrator 新增 §9 Kimi Server 断连 4 步自主恢复（R1-R4），5 个 guide 引用；③ `poll_command` 从硬编码端口改为每次轮询动态读 lock 文件——Server 重启换端口后脚本不再失效；④ 确认 Kimi Server OOM 崩溃为断连根因（~20h 运行后堆耗尽） |
 | 2026-07-16 | v2.12.2 | **Loop 自循环协议序列化**：§3 执行循环从箭头流程图重构为 7 步编号门控协议（STEP 1-7，每步 ✓ 门控 + ⛔ 阻断点）。修复 PM 遗忘 Bash 后台监控问题——execute_prompt→Bash 从建议变为不可跳过步骤，SKILL.md 新增 4 项自检清单。verify/implement/parallel 统一引用核心 STEP 编号 |
 | 2026-07-16 | v2.12.1 | **Skill memory 调用格式修复**：`session-retire` 7-block 模板 `memory_get` namespace 拼写错误（`session/<id>/handoff/completed` → `session/<id>/handoff`），致接班 session 手动读取返回空（`fromSession` 注入正常）；`loop-orchestrator` 5 文件 17 处修复——`memory_get` 位置参数→命名参数（防 MCP 工具名冲突）+ `memory_set` key-in-namespace 拆分。详见 skills 代码 |

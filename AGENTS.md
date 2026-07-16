@@ -1,6 +1,8 @@
 <!--
 修改记录（最近 — 完整历史见 README.md §版本历史）:
-  2026-07-16 | kimi-code (feat) | 跨项目记忆双层注入：buildInjection() 消费 profile.cwd 生成双层注入文本（全局正文 + 子项目索引导航表）；6 个 memory_* MCP 工具添加 project 可选参数支持跨项目 DB 路由；else 分支显式 ensureDb(tunnelProjectRoot) 防状态泄漏
+  2026-07-16 | kimi-code (feat) | 跨项目记忆双层注入（v2.13）：buildInjection() 消费 profile.cwd → 全局正文 + 子项目索引导航表；6 个 memory_* MCP 工具 project 参数路由 + resolveProjectRoot 守卫；skill Q1b + guide-cross-project-memory.md 新建；9/9 测试通过
+  2026-07-16 | kimi-code (fix) | Server 断联自主恢复规范：8 个 skill 文件（kimi-session-orchestrator 5 + session-retire + xmind-orchestrated + xmind）统一添加 R1-R4 恢复流程
+  2026-07-16 | kimi-code (docs) | README 架构图补全（SessionWatcher/MessageQueue/OrchestrationStore）+ 项目结构补全（session-watcher/poll-command/wire-transport）+ 新增 §行业痛点对照（8 类 24 条）；index.ts 版本号 v2.0.0→v2.12.3
   2026-07-16 | kimi-code (fix) | session-retire cwd 修复：Phase 1 标记 get_session_info.workdir 为内部标识符（非绝对路径），PM 应从任务上下文或 read_session_log 确定 cwd；避免接班 session 创建到错误目录
   2026-07-16 | kimi-code (fix) | memory 注入 MCP 去歧义：buildInjection() 加 ⛔ 前缀指定 kimi-session-orchestrator MCP（修复 task session 调错 knowledge-graph memory_get）；§9 Kimi Server 断连 4 步自主恢复写入 7 个 guide；poll_command 动态端口检测（Server 重启换端口后脚本不再 exit 2）
   2026-07-16 | kimi-code (fix) | Skill memory_* 调用格式修复：session-retire 7-block 模板中 memory_get 把 key 拼进 namespace 致接班 session 读取为空（3 次独立调用→1 次合并调用）；loop-orchestrator 5 文件 memory_get 位置参数→命名参数（防 MCP 工具名冲突）+ memory_set 拆分 key-in-ns（17 处）；部署到 ~/.kimi-code/skills/
@@ -47,8 +49,10 @@ src/
 ├── http-server.ts           # Express + WebSocket 装配入口（薄层）
 ├── wire-client.ts           # Kimi Server REST + WS 推送客户端（实现 IWireClient 接口，v2.10 拆分）
 ├── message-queue.ts         # WebSocket 客户端注册 + pub/sub 广播（简化为 67 行）
-├── session-orchestrator.ts  # 多轮任务编排引擎（不再被 chat_with_session 使用）
-├── workflow-template.ts     # 工作流模板类型定义 + YAML解析 + 校验
+├── session-log-reader.ts      # wire.jsonl 日志解析 + IO 提取 + sanitizeText
+├── orchestration-store.ts    # PM→子 session 编排关系内存追踪
+├── wire-transport.ts         # REST 底层 HTTP 传输
+├── workflow-template.ts     # 模板类型定义 + YAML 解析 + Zod 校验
 ├── workflow-store.ts        # 模板持久化（CRUD：list/load/save/delete）
 ├── workflow-engine.ts       # 自适应工作流引擎：创建session→逐步驱动→阻塞处理→恢复
 ├── session-watcher.ts        # WS 事件驱动后台监听：每3s检查状态，完成时自动拉取回复
