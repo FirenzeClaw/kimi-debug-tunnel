@@ -3,7 +3,7 @@
 # Kimi Session Orchestrator
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-v2.12.3-brightgreen)]()
+[![Version](https://img.shields.io/badge/version-v2.14-brightgreen)]()
 [![Node](https://img.shields.io/badge/node-%E2%89%A5%2022-339933)]()
 [![MCP Tools](https://img.shields.io/badge/MCP%20tools-29-orange)]()
 [![Skills](https://img.shields.io/badge/skills-7-blue)]()
@@ -561,6 +561,8 @@ PM 操作:                            Task session 首 turn:
 | `docs/loop-engineering-analysis.md` | Loop Engineering 概念与本项目架构逐项对照分析——四层循环堆栈/三级 Agent Loop/差距识别/改进方向 |
 | `docs/superpowers/specs/2026-07-11-skill-split-design.md` | [DONE] Skill 拆分加载架构设计 |
 | `docs/superpowers/plans/2026-07-11-skill-split.md` | [DONE] Skill 拆分实现计划 |
+| `docs/superpowers/specs/2026-07-16-context-tokens-monitoring-design.md` | [DONE] 上下文长度 Bash 监控 + Session 规范统一设计（v2.14） |
+| `docs/superpowers/plans/2026-07-16-context-tokens-monitoring.md` | [DONE] 上下文长度监控实现计划（v2.14） |
 
 ## Linux 部署
 
@@ -719,6 +721,7 @@ npm start
 
 | 日期 | 版本 | 变更 |
 |------|:--:|------|
+| 2026-07-16 | v2.14 | **上下文长度 Bash 监控 + Session 规范统一**：① `poll-command.ts` 新增 `parse_context()` 函数，session 完成时自动检查 `context_tokens`，超过阈值输出 `[CTX_HIGH]` 提醒退役。三级阈值优先级：环境变量 `CTX_HIGH_THRESHOLD` > `~/.kimi-tunnel/ctx-threshold` 配置文件 > 默认 36000。② 两条核心规范（逐条注入、session 复用优先）+ context_tokens 监控铁律收敛到 `kimi-session-orchestrator` 和 `loop-orchestrator` 两个 SKILL.md 入口，4 个 sub-guide 冗余清扫（移除重复规则声明，改为 SKILL.md 引用）。③ `session-retire` cwd 修正：跨项目场景下 cwd 不再强制用 projectRoot，改为退役 session 实际工作目录（v2.13 双层记忆自动按 cwd 路由）。详见 `docs/superpowers/specs/2026-07-16-context-tokens-monitoring-design.md` |
 | 2026-07-16 | v2.13 | **跨项目记忆双层注入**：`buildInjection()` 消费 `profile.cwd` 生成双层注入（全局正文 + 子项目索引导航表）；6 个 `memory_*` MCP 工具添加 `project` 可选参数支持跨项目 DB 路由，`else` 分支防状态泄漏 + `resolveProjectRoot` 守卫；skill Q1b + `guide-cross-project-memory.md` 新建；Server 断联恢复规范部署到 8 个 skill 文件；README 架构图/项目结构/行业痛点对照更新 |
 | 2026-07-16 | v2.12.3 | **MCP 去歧义 + 断连恢复 + 轮询动态端口**：① `buildInjection()` 注入 ⛔ 前缀指定 `kimi-session-orchestrator` MCP——修复 task session 调错 `memory` 知识图谱 MCP 同名工具；② loop-orchestrator 新增 §9 Kimi Server 断连 4 步自主恢复（R1-R4），5 个 guide 引用；③ `poll_command` 从硬编码端口改为每次轮询动态读 lock 文件——Server 重启换端口后脚本不再失效；④ 确认 Kimi Server OOM 崩溃为断连根因（~20h 运行后堆耗尽） |
 | 2026-07-16 | v2.12.2 | **Loop 自循环协议序列化**：§3 执行循环从箭头流程图重构为 7 步编号门控协议（STEP 1-7，每步 ✓ 门控 + ⛔ 阻断点）。修复 PM 遗忘 Bash 后台监控问题——execute_prompt→Bash 从建议变为不可跳过步骤，SKILL.md 新增 4 项自检清单。verify/implement/parallel 统一引用核心 STEP 编号 |

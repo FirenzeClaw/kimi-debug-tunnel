@@ -82,6 +82,13 @@ description: 当需要操作 kimi-session-orchestrator MCP 工具时使用
 4. **auto_mode=true 时不需要手动审批** — 工具调用自动通过
 5. **create_session 的 permission_mode="auto" 是 session 级别** — 后续 prompt 也需 auto_mode=true
 
+6. **⛔ 逐条注入** — 每次 execute_prompt 只含一个操作指令；等 task session 完成
+   → PM 审查 → 再发下一步。严禁一条 prompt 包多个操作。
+7. **⛔ Session 复用优先** — 同模块连续工作同 session 继续；新建仅限：上下文超限 /
+   产出质量下降 / 模块切换。
+8. **context_tokens 监控**（v2.14）— bash 轮询完成时自动检查；> 36K 输出
+   `[CTX_HIGH]` 提醒退役。
+
 ---
 
 ## Server 断联/未启动自主恢复

@@ -29,19 +29,19 @@ session 1（复用）: execute_prompt(step_2) → grade → PASS
 
 | 触发条件 | 操作 |
 |----------|------|
+| context_tokens > 36K（bash 通知 [CTX_HIGH]） | 同下，首选指标（v2.14） |
 | 累计注入 > 5 条独立指令 | `memory_set` 记录进度 → `memory_archive` 归档 → `create_session(from_session=旧sid)` 接班 |
-| 上下文腐化信号 | `list_io_records` → `totalTurns ≥ 80` 或 `read_session_log` → `totalLines ≥ 1500` → retire |
+| totalTurns ≥ 80 或 totalLines ≥ 1500（代理指标，降级方案） | 同上 |
 | 产出质量下降（偏离规范/遗漏要点/幻觉） | 立即 retire |
 | 跨模块切换 | 必须新 session |
 
 ## §4 铁律
 
+> 通用铁律（逐条注入、session 复用优先、context_tokens 监控）见 SKILL.md §核心铁律。
+
 | 规则 | 原因 |
 |------|------|
-| 一个 execute_prompt 一个目标 | 多目标合一 → 注意力稀释 |
 | 验收标准一次给完，修复一条一条来 | 验收需全局视角，修复需聚焦 |
-| 跨模块必须分 session | 不同模块上下文互不相关 |
-| session 复用优先 | grade_step / 修复指令同 session 继续 |
 
 ---
 

@@ -43,26 +43,31 @@ description: Use when retiring a task session and spawning a successor with full
    ⚠️ workdir 字段是 Kimi Code 内部标识符（如 cli-research/2ffc9873b6c1），
    不是绝对路径。不要用它作为 create_session 的 cwd。
 
-   确定接班 session 的 cwd——必须用项目根目录，不是任务子目录：
-   - 项目根目录 = 包含 .kimi-tunnel/ 的目录（memory.db 在此）
-   - PM session 自身的 cwd 即是项目根目录（PM 始终在根目录工作）
-   - 退役 session 可能在子目录（如 D:/code/proj/mycli），任务子目录 ≠ 项目根
-   - 方法：memory_status 返回 projectRoot 字段，或直接沿用 PM 自身 cwd
-   - ⛔ 不要用退役 session 中读取的文件路径去推断——那是任务子目录
+   确定接班 session 的 cwd——必须用退役 session 实际工作的目录：
+   - 从 list_io_records / read_session_log 中提取文件路径推断（如 D:/code/cli-research/mycli/src/... → D:/code/cli-research/mycli）
+   - 若 PM 记得创建该 session 时指定的 cwd → 直接使用
+   - 若退役 session 在子项目路径下（不同于 PM session 的 cwd）→ 子项目路径才是正确 cwd
+   - ⛔ 不要用 PM session 自身 cwd 或 memory_status 的 projectRoot —— 那是统筹项目，不是任务项目
+   - ⛔ 不要用项目根目录（如 D:/code/cli-research）替代任务工作目录（如 D:/code/cli-research/mycli）
+   - v2.13+ 双层记忆注入自动按 cwd 选择正确的 memory.db，无需手动指定项目根
 
 ② list_io_records(session_id="<retiring_id>", limit=15, max_content_length=3000)
-   → 最近 15 轮 prompt↔回复，用于提取已完成/待办/决策
+   → 最近 15 轮 prompt↔回复，用于提取已完成/待办/决策 + **推断退役 session 的实际 cwd**
 
 ③ read_session_log(session_id="<retiring_id>", limit=50)
-   → 深度上下文：错误、工具调用链、阻塞点
+   → 深度上下文：错误、工具调用链、阻塞点 + **确认退役 session 的工作目录**
 
 ④ memory_get(namespace="project/meta")      ← 若 Phase 0 跳过则直接跳过
    memory_get(namespace="project/decisions")
    memory_get(namespace="project/learnings")
-   → 项目知识基线（新 session 也需要这些）
+   → 以上三步均不加 project 参数（默认取 PM session 项目基线）
+   → 若退役 session 在子项目，额外调用带 project 参数的版本获取子项目基线：
+   memory_get(namespace="project/meta", project="<退役 session 的 cwd>")
+   memory_get(namespace="project/decisions", project="<退役 session 的 cwd>")
+   → 新 session 通过 memory_level=full + from_session 自动获取两层记忆
 ```
 
-**完成标准**：拿到项目根目录绝对路径（非子目录、非 workdir） + 最近对话摘要 + 项目知识基线（若可用）。
+**完成标准**：拿到退役 session 实际工作目录的绝对路径 + 最近对话摘要 + 两层项目知识基线（若可用）。
 
 ### Phase 2 — 归档与持久化
 
@@ -115,7 +120,7 @@ description: Use when retiring a task session and spawning a successor with full
 
 ```
 ⑦ create_session(
-     cwd="<项目根目录>",          ← 包含 .kimi-tunnel/ 的目录，不是任务子目录
+     cwd="<退役 session 实际工作的目录>",  ← 从 Phase 1 推断的实际 cwd，不是 PM session cwd，不是 projectRoot
      permission_mode="auto",
      memory_level="full",
      from_session="<retiring_id>"
@@ -184,6 +189,7 @@ description: Use when retiring a task session and spawning a successor with full
 | 新 session 超时未确认上下文 | 用 poll_session 检查状态。若 idle 超过 60s → 重新发送首条 prompt |
 | 退役 session 仍活跃（未 idle） | 等待其完成当前 turn → 继续。不强制中断正在执行的 session。 |
 | 批量退役多个 session | 逐个处理。每个完整的 Phase 1→5 后再开始下一个。汇报时汇总。 |
+| **退役 session 在子项目路径** | cwd 是退役 session 实际工作目录（如 D:/code/cli-research/mycli），不是项目根（D:/code/cli-research），更不是 PM 项目根（D:/code/kimi-session-orchestrator） | Phase 1 从 io_records/log 推断实际 cwd；v2.13 双层记忆自动按 cwd 选正确的 memory.db |
 
 ## Common Mistakes
 
@@ -195,12 +201,14 @@ description: Use when retiring a task session and spawning a successor with full
 | 7-block 模板缺区块 | 新 session 不知道规范文件、权限边界、已做决策 | 全部 7 个区块必须填写，不可留空 |
 | 不给新 session 时间建立上下文 | 新 session 跳过 AGENTS.md + memory_get，直接执行任务 → 偏离规范 | 等待"上下文已建立"回复后再分派任务 |
 | 退役前未执行 memory_archive | session 期间的全部发现随 session 关闭而丢失 | Phase 2 步骤⑤不可跳过（除非无数据） |
+| **cwd 用 PM 项目根或 projectRoot** | 接班 session 创建到错误目录，无法访问退役 session 实际工作的文件 | cwd = 退役 session 实际工作目录（从 io_records/log 推断），v2.13 自动处理记忆分层 |
 
 ## Red Lines
 
 - 退役前未执行 memory_archive → 丢失全部发现
 - **memory 未初始化时不做询问直接降级** → handoff 数据未持久化，信息仅靠一次性 prompt 传递
 - create_session 未传 from_session → 接班 session 盲飞
+- **create_session cwd 用错（PM 项目根 / projectRoot / 项目根目录）** → 接班 session 在错误目录工作，v2.13 记忆注入错位
 - 新 session 首条 prompt 无启动自举指令 → session 不知道要读什么
 - 上下文建立前分派任务 → 冲动操作，产出不可靠
 - 7-block 模板有空白区块 → 信息缺口 = PM 失职

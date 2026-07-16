@@ -1,5 +1,6 @@
 <!--
 修改记录（最近 — 完整历史见 README.md §版本历史）:
+  2026-07-16 | kimi-code (feat) | 上下文长度 Bash 监控 + Session 规范统一（v2.14）：poll-command 新增 parse_context() + CTX_HIGH_THRESHOLD 三级阈值（环境变量 > ~/.kimi-tunnel/ctx-threshold > 36000）；逐条注入/session 复用优先/context_tokens 监控三条铁律收敛到 2 个 SKILL.md 入口，4 个 sub-guide 冗余清扫；session-retire cwd 修正跨项目场景（cwd=退役 session 实际工作目录，非 projectRoot）
   2026-07-16 | kimi-code (feat) | 跨项目记忆双层注入（v2.13）：buildInjection() 消费 profile.cwd → 全局正文 + 子项目索引导航表；6 个 memory_* MCP 工具 project 参数路由 + resolveProjectRoot 守卫；skill Q1b + guide-cross-project-memory.md 新建；9/9 测试通过
   2026-07-16 | kimi-code (fix) | Server 断联自主恢复规范：8 个 skill 文件（kimi-session-orchestrator 5 + session-retire + xmind-orchestrated + xmind）统一添加 R1-R4 恢复流程
   2026-07-16 | kimi-code (docs) | README 架构图补全（SessionWatcher/MessageQueue/OrchestrationStore）+ 项目结构补全（session-watcher/poll-command/wire-transport）+ 新增 §行业痛点对照（8 类 24 条）；index.ts 版本号 v2.0.0→v2.12.3

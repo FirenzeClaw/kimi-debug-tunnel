@@ -81,9 +81,9 @@ description: 当需要进行多轮次自动循环编排（实施/验收闭环）
 | **execute_prompt 后立即 Bash 后台轮询**（用 poll_command 原文） | 跳过 → task session 回复永远丢失 |
 | 即发即返，不阻塞 | MCP 超时截断 |
 | 后台 Bash 轮询 | 零 token 等待 |
-| 一个 execute_prompt 一个目标 | 多目标合一 → 注意力腐化 |
+| ⛔ 逐条注入（一次一个操作指令） | 多操作合一 → 注意力稀释、PM 无法定位错误 |
 | 跨模块必须分 session | 上下文污染 |
-| session 复用优先 | grade_step / 修复同 session 继续 |
+| session 复用优先 | 新建仅限：context_tokens > 36K / 质量下降 / 模块切换 |
 
 ### 后台监控自检清单（每次 execute_prompt 后）
 
@@ -93,6 +93,7 @@ description: 当需要进行多轮次自动循环编排（实施/验收闭环）
 | 2 | `Bash(run_in_background=true)` 已调用？命令 = poll_command 原文 | 未调用 → 立即补 |
 | 3 | Bash 返回了 task_id？ | 无 → 重试 |
 | 4 | task_id 已关联 session_id 记录？ | 未记 → 立即记 |
+| 5 | Bash 通知含 `[CTX_HIGH]`？ | 是 → 评估退役；否 → 继续 |
 
 ---
 

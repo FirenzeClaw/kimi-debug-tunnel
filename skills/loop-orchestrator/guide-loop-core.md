@@ -101,8 +101,8 @@ STEP 7 — 完成工作包
 | 多个 session 共用同一个 Bash 后台任务 | 一个 Bash 只轮询一个 session |
 
 **上下文腐化监控：**
-- `list_io_records` → `totalTurns ≥ 80` → retire
-- `read_session_log` → `totalLines ≥ 1500` → retire
+- `context_tokens > 36K`（bash 通知 [CTX_HIGH]）→ retire（v2.14 首选）
+- `totalTurns ≥ 80` 或 `totalLines ≥ 1500` → retire（代理指标，降级方案）
 - 产出质量下降（偏离规范/遗漏要点/幻觉）→ 立即 retire
 
 **强制拆 session 操作序列：**
@@ -127,7 +127,7 @@ create_session(from_session=旧sid, cwd=..., permission_mode="auto")
   └─ 无法解决? → 暂停向用户汇报（不降级）
 
 诊断结果拿到后：
-  上下文健康（turns < 80 且 lines < 1500）?
+  上下文健康（context_tokens ≤ 36K 且 turns < 80 且 lines < 1500）?
     → 注入原 session → 重试（重置 retry 计数）
   上下文腐化?
     → memory_set(namespace="session/loop-<id>", key="progress", value="<progress JSON>")
