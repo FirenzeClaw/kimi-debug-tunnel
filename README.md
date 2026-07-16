@@ -14,7 +14,7 @@
 
 | 问题 | 方案 |
 |------|------|
-| **上下文腐化** — session 越跑越笨，偏离规范 | `session-retire` 自动退役 + `loop-orchestrator` 干净上下文派发 |
+| **上下文腐化** — session 越跑越笨，偏离规范 | `session-retire` 一键快速退役接班 + `loop-orchestrator` 干净上下文派发 |
 | **无法确认完工** — Agent 说"好了"但实际没好 | `grade_step` LLM 评分验证 + loop 指纹检测，不过就重试 |
 | **冷启动灾难** — 每次新 session 从零开始 | `from_session` 注入 + 7-block 交接模板，5 步建完上下文 |
 | **重复告知规范** — Agent 不记得项目约定 | `memory_set` 一次录入 → 新 session 自动注入索引 → 按需拉取 |
