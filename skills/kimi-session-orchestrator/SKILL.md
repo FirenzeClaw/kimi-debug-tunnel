@@ -81,3 +81,31 @@ description: 当需要操作 kimi-session-orchestrator MCP 工具时使用
 3. **收到通知后再读 output.log** — 不要提前 TaskOutput
 4. **auto_mode=true 时不需要手动审批** — 工具调用自动通过
 5. **create_session 的 permission_mode="auto" 是 session 级别** — 后续 prompt 也需 auto_mode=true
+
+---
+
+## Server 断联/未启动自主恢复
+
+当 MCP 工具返回 "Wire client 未连接到 Kimi Server" 或 `get_tunnel_status` 显示 `wireConnected: false` 时，**无需等待用户指示**，自主执行以下恢复流程：
+
+**R1 — 诊断**
+`Bash: cat ~/.kimi-code/server/lock`
+→ lock 存在且 PID 存活？跳 R3
+→ lock 缺失或 PID 已死？进 R2
+
+**R2 — 启动 Kimi Server**
+`Bash(run_in_background=true): kimi web --no-open &`
+等待 8-10s，确认 lock 文件出现且 port 字段有效。
+
+**R3 — 等待 Tunnel 自动重连**
+Tunnel 每 10s 自动检测 lock 并重试连接。等待 ≤30s。
+`get_tunnel_status` 确认 `wireConnected: true`。
+超过 120s 仍未恢复 → 在终端执行 `/reload` 强制重启 MCP 进程。
+
+**R4 — 恢复状态**
+- `get_tunnel_status` 确认 `wireConnected: true`
+- 检查活跃 task session：`poll_session` 逐个确认状态
+- 检查后台 Bash 任务：`TaskList` 查看是否因断连异常退出 → 重建
+- 断连前已提交的 prompt 不受影响——继续原流程
+
+> 详细流程见 `skills/loop-orchestrator/guide-loop-core.md §9`（含断连期间保障、恢复后必做清单）。
