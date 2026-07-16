@@ -2,6 +2,19 @@
 
 All notable changes to kimi-session-orchestrator.
 
+## v2.15 — 2026-07-16
+
+**Poll Command Bash → Python 重写**
+
+- `poll-command.ts`: `generatePollCommand()` 从混合 bash+curl 改为纯 `python -c` 内联脚本
+  - 消除 node 依赖：锁读取改用 `json.load(open(lock_path))`
+  - 新增 LOCK_LOST 重试：锁文件暂时消失时重试 5 次（间隔 3s），耗尽后输出 `[LOCK_LOST]` 并 exit 4
+  - 修复子 shell 变量丢失：bash 函数 `parse_status` 在子 shell 中修改变量父 shell 不可见 → 单 Python 进程彻底解决
+  - 退出码协议扩展：0=完成, 2=server离线, 3=超时, 4=锁丢失
+  - Shell wrapper 缩减为 1 行：`PYTHONIOENCODING=utf-8 python3 -c "..." || python -c "..."`
+- 设计文档: `docs/superpowers/specs/2026-07-16-poll-command-python-rewrite-design.md`
+- 实现计划: `docs/superpowers/plans/2026-07-16-poll-command-python-rewrite.md`
+
 ## v2.14 — 2026-07-16
 
 **上下文长度 Bash 监控 + Session 规范统一**

@@ -1,5 +1,6 @@
 <!--
 修改记录（最近 — 完整历史见 CHANGELOG.md）:
+  2026-07-16 | kimi-code (fix) | poll-command Bash→Python 重写：消除 node 依赖（换 Python json.load 读锁），新增 LOCK_LOST 重试（5×3s → exit 4），修复子 shell 变量丢失（单 Python 进程），退出码扩展为 0/2/3/4；shell wrapper 缩减为 1 行 PYTHONIOENCODING=utf-8 python3 -c "..." || python -c "..."
   2026-07-16 | kimi-code (feat) | 上下文长度 Bash 监控 + Session 规范统一（v2.14）：poll-command 新增 parse_context() + CTX_HIGH_THRESHOLD 三级阈值（环境变量 > ~/.kimi-tunnel/ctx-threshold > 36000）；逐条注入/session 复用优先/context_tokens 监控三条铁律收敛到 2 个 SKILL.md 入口，4 个 sub-guide 冗余清扫；session-retire cwd 修正跨项目场景（cwd=退役 session 实际工作目录，非 projectRoot）
   2026-07-16 | kimi-code (feat) | 跨项目记忆双层注入（v2.13）：buildInjection() 消费 profile.cwd → 全局正文 + 子项目索引导航表；6 个 memory_* MCP 工具 project 参数路由 + resolveProjectRoot 守卫；skill Q1b + guide-cross-project-memory.md 新建；9/9 测试通过
   2026-07-16 | kimi-code (fix) | Server 断联自主恢复规范：8 个 skill 文件（kimi-session-orchestrator 5 + session-retire + xmind-orchestrated + xmind）统一添加 R1-R4 恢复流程
@@ -63,7 +64,7 @@ src/
 ├── policy-engine.ts         # 策略引擎：解析/检查/绑定/阻断消息
 ├── memory-store.ts          # SQLite 共享内存 CRUD + buildInjection() + 记忆profiles（v2.10：set/getMemoryProfile 移入）
 ├── server-lock.ts           # Kimi Server 端口自动检测 + stale lock 清理（v2.10：从 wire-client 提取）
-├── poll-command.ts           # Bash 轮询脚本生成（curl + Python urllib fetch）
+├── poll-command.ts           # 纯 Python 内联轮询脚本生成（python -c，v2.15 重写）
 ├── tools/
 │   ├── helpers.ts            # 共享工具辅助函数（v2.10：preparePrompt + ensureConnected, v2.11：injectMemoryIntoPrompt + setMemoryProfileWithExpiry）
 │   ├── manifest.ts            # 工具注册桶文件 — 统一导入点（v2.11）
@@ -165,32 +166,18 @@ npm run inspector    # MCP Inspector 调试模式
 ① create_session(cwd, permission_mode="auto")     → 获得 sessionId
 ② execute_prompt(sessionId, task, auto_mode=true) → { submitted: true }
 
-③ Bash(run_in_background=true):   # 端口从 lock 文件自动获取
-   PORT=$(node -e "console.log(JSON.parse(require('fs').readFileSync(require('os').homedir()+'/.kimi-code/server/lock','utf8')).port)")
-   PY=$(which python3 2>/dev/null || which python 2>/dev/null || echo python)
-   SID="<sessionId>"
-   while true; do
-     STATUS=$(curl -s -H "Authorization: Bearer $KIMI_SERVER_TOKEN" \
-       "http://127.0.0.1:$PORT/api/v1/sessions/$SID/status" | \
-       $PY -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('status',''))")
-     if [ "$STATUS" = "idle" ] || [ "$STATUS" = "aborted" ]; then break; fi
-     sleep 2
-   done
-   curl -s -H "Authorization: Bearer $KIMI_SERVER_TOKEN" \
-     "http://127.0.0.1:$PORT/api/v1/sessions/$SID/messages?page_size=5&role=assistant" | \
-     $PY -c "import sys,json
-data=json.load(sys.stdin).get('data',{})
-for m in data.get('items',[]):
-  for b in m.get('content',[]):
-    if b.get('type')=='text': print(b['text']); break"
+③ Bash(run_in_background=true):   # poll_command 自动生成纯 Python 轮询脚本
+   # execute_prompt / chat_with_session 返回的 poll_command 字段即完整命令
+   # 直接粘贴执行即可，Python 脚本内部：读锁→轮询 status→idle/aborted 时 fetch 回复
+   # 退出码: 0=完成, 2=server离线, 3=超时, 4=锁丢失(需PM介入)
 
 ④ 统筹 session 继续交互（不阻塞）
 ⑤ 后台进程完成 → 自动通知 → 读取输出拿到回复
 ```
 
-**原理**：Kimi Code 后台任务基于操作系统进程退出信号，零 CPU 轮询开销。bash 进程 curl 等到 idle 后退出 → runtime 注入 `<notification>` 到统筹 session。
+**原理**：Kimi Code 后台任务基于操作系统进程退出信号，零 CPU 轮询开销。Python 进程 urllib 轮询等到 idle 后退出 → runtime 注入 `<notification>` 到统筹 session。脚本内不依赖 node（锁读取用 Python json.load），单进程执行无子 shell 变量作用域问题。
 
-> ⛔ **轮询脚本陷阱（v2.8.4 已修复）**：`execute_prompt` 返回的 `poll_command` 已正确格式化。`fetch_result` 使用 Python `urllib.request` 直连 HTTP（无 curl 管道截断）+ `PYTHONIOENCODING=utf-8`（Windows emoji 兼容）。**始终直接使用 `poll_command` 字段内容，不要改写。** 原始陷阱：bash 双引号 `\n` 不展开 + `2>/dev/null` 静默吞 `JSONDecodeError`；curl 管道大响应截断。
+> ⛔ **poll_command 使用规范（v2.15）**：`execute_prompt` 返回的 `poll_command` 是完整的 `python3 -c "..."` 内联脚本，**直接以 `Bash(run_in_background=true)` 执行即可，不要改写**。脚本纯 Python 实现：`sys.argv` 接收参数 → `json.load(open())` 读锁（5次重试）→ `urllib.request` 轮询 status → idle 时 fetch 回复。退出码 0/2/3/4 对应不同状态。原始陷阱（v2.8.4 修复）：bash 双引号 `\n` 不展开 + `2>/dev/null` 静默吞 `JSONDecodeError`；curl 管道大响应截断；node -e 读锁不可靠（v2.15 修复）。
 
 ### 备选：MCP 内部工具（轻量场景）
 
