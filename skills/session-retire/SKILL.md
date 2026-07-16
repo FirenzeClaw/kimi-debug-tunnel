@@ -43,9 +43,12 @@ description: Use when retiring a task session and spawning a successor with full
    ⚠️ workdir 字段是 Kimi Code 内部标识符（如 cli-research/2ffc9873b6c1），
    不是绝对路径。不要用它作为 create_session 的 cwd。
 
-   通过以下方式确定cwd：
-   - 退役 session 正在做的任务——PM 已知项目路径，写入 Phase 3 的「项目路径」
-   - 或从 read_session_log 首条 user prompt 中提取（通常含工作目录）
+   确定接班 session 的 cwd——必须用项目根目录，不是任务子目录：
+   - 项目根目录 = 包含 .kimi-tunnel/ 的目录（memory.db 在此）
+   - PM session 自身的 cwd 即是项目根目录（PM 始终在根目录工作）
+   - 退役 session 可能在子目录（如 D:/code/proj/mycli），任务子目录 ≠ 项目根
+   - 方法：memory_status 返回 projectRoot 字段，或直接沿用 PM 自身 cwd
+   - ⛔ 不要用退役 session 中读取的文件路径去推断——那是任务子目录
 
 ② list_io_records(session_id="<retiring_id>", limit=15, max_content_length=3000)
    → 最近 15 轮 prompt↔回复，用于提取已完成/待办/决策
@@ -59,7 +62,7 @@ description: Use when retiring a task session and spawning a successor with full
    → 项目知识基线（新 session 也需要这些）
 ```
 
-**完成标准**：拿到绝对路径 cwd（非 workdir 标识符）+ 最近对话摘要 + 项目知识基线（若可用）。4 个调用全部返回（含空）。
+**完成标准**：拿到项目根目录绝对路径（非子目录、非 workdir） + 最近对话摘要 + 项目知识基线（若可用）。
 
 ### Phase 2 — 归档与持久化
 
@@ -81,7 +84,7 @@ description: Use when retiring a task session and spawning a successor with full
 
 ```
 【项目背景】
-- 项目路径: <cwd>
+- 项目路径: <项目根目录——包含 .kimi-tunnel/ 的目录，不是任务子目录>
 - 项目类型: <从 project/meta 提取>
 - 当前阶段: <当前 work phase>
 
@@ -112,7 +115,7 @@ description: Use when retiring a task session and spawning a successor with full
 
 ```
 ⑦ create_session(
-     cwd="<cwd>",
+     cwd="<项目根目录>",          ← 包含 .kimi-tunnel/ 的目录，不是任务子目录
      permission_mode="auto",
      memory_level="full",
      from_session="<retiring_id>"

@@ -11,6 +11,30 @@
 
 Kimi Code CLI 的 **Loop Engineering** PM 视角多 session 编排系统——不手动 prompt Agent，而是设计自动 prompt Agent 的循环系统。29 个 MCP 工具，支持 L2 验证闭环（`grade_step` LLM 自动评分 + loop 指纹检测）+ 自适应工作流引擎 + 三层共享内存 + 权限策略管理。
 
+---
+
+> 启动 session 整理完 PRD、SPEC、PLAN 后想直接实施，又担心上下文累积导致 session 注意力不集中？
+>
+> → **方案 A — 快速接力**：`session-retire` skill。检测到衰减信号 → 退役 → 归档 → 7-block 交接 → 接班 session 接续。轻度腐化时近乎无损，重度时能止损。
+>
+> → **方案 B — 不直接实施**：`/loop-orchestrator`。把当前 session 转为 PM 统筹角色，拆解任务→派发到**独立 task session**→验证→交付。实施 session 永远从干净上下文起步，腐化从源头规避。
+>
+> 每次 session 交接 handoff 麻烦且不连贯？
+>
+> → 同一套 `session-retire` pipeline：`memory_archive` 自动归档 findings → `memory_set` 结构化 handoff（completed/pending/decisions）→ 接班人 `fromSession` 注入 + 自举协议，**5 步建完上下文**，不用手写交接文档。
+>
+> 重复工作交给 Agent 总是停在犄角旮旯，或者不确定是否真的完工？
+>
+> → `grade_step` LLM 自动评分验证 + loop 指纹检测：逐条验收标准评分（pass/fail + 详细反馈），失败自动重试（≤2 次），**3 次不过升级阻塞干预**，不是模糊的"看起来差不多了"。
+>
+> 想要 Loop Engineering 能力但又无从下手？
+>
+> → `/loop-orchestrator` 一键启动：Q1-Q5 引导（目标→模式→策略→标准→确认），进入 6 阶段**全自主循环**（记忆加载→拆解→执行→阻塞干预→里程碑→交付），PM 只需给目标，系统自己转。
+
+**这就是 Kimi Session Orchestrator 要解决的问题。** 你不是在手动操作 Agent——你是在设计一套**自动运转的编排系统**。拆解→派发→验证→修复→交付，PM 把关、Agent 执行、系统兜底。
+
+---
+
 ## 目录
 
 - [Loop Engineering](#loop-engineering-v29)
