@@ -60,9 +60,10 @@ Step 1: long_task(wait=false)
   → { submitted: true, task_id: "...", poll_command: "..." }
 
 Step 2: Bash(run_in_background=true, command=poll_command)
-  → 后台 bash 进程 curl 轮询，完成时自动通知
+  → 后台 Python 进程 urllib 轮询，完成时自动通知
 
-Step 3: <notification> 到达 → 读取 output.log → 拿到结果
+Step 3: <notification> 到达 → Read ~/.kimi-tunnel/poll-result-{sid}.txt → 拿到结果
+  （或读取通知中的 output.log 路径）
 ```
 
 **备选**：MCP 轮询工具（轻量场景）：
@@ -100,7 +101,7 @@ interface PollResult {
 | 慢通道 | `wire-client.ts` → `sendPrompt()` | submit + 等待直到 idle |
 | 工具层 | `tools/execute-prompt.ts` | `wait=false` 即发即返 + 返回 `poll_command` |
 | 轮询工具 | `tools/poll-session.ts` | 结构化状态（WS 缓存优先） |
-| 后台轮询 | `poll-command.ts` → `generatePollCommand()` | 生成跨平台 bash 轮询脚本 |
+| 后台轮询 | `poll-command.ts` → `generatePollCommand()` | 生成纯 Python 内联轮询脚本；预置脚本存在时返回短命令 `python3 ~/.kimi-tunnel/poll.py <args>` |
 | 使用规范 | skill: `kimi-session-orchestrator` | 完整 MCP 工具使用规则 |
 
 ## 常见错误
@@ -112,4 +113,4 @@ interface PollResult {
 | `wait` 默认 `true` | 默认 `false`，即发即返 |
 | 超时后认为任务失败 | 超时只说明等待超时，任务可能仍在运行——提示用户用轮询工具检查 |
 | 在同一 turn 内反复调用轮询工具 | 用 `Bash(run_in_background=true)` 后台轮询，零 token 等待 |
-| 手动拼接 curl 轮询命令 | 工具返回的 `poll_command` 已包含完整跨平台脚本 |
+| 手动拼接轮询命令 | 工具返回的 `poll_command` 已包含完整 Python 脚本（v2.16 起支持短命令 + 降级内联） |

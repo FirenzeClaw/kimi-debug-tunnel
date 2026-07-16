@@ -1,7 +1,9 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { TunnelServices } from "../types.js";
-import { generatePollCommand } from "../poll-command.js";
+import { POLL_SCRIPT, generatePollCommand } from "../poll-command.js";
+import { writeFileSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
 import { preparePrompt, ensureConnected } from "./helpers.js";
 
 export function registerExecutePrompt(server: McpServer, services: TunnelServices): void {
@@ -68,17 +70,32 @@ export function registerExecutePrompt(server: McpServer, services: TunnelService
         });
 
         if (!wait) {
-          // Fire-and-forget: submit prompt, return immediately with poll command
           const { promptId } = await wireClient.submitPrompt(session_id, effectivePrompt, { autoApprove: auto_mode });
+
+          let degraded = false;
+          const pollPyDir = `${homedir()}/.kimi-tunnel`;
+          const pollPyPath = `${pollPyDir}/poll.py`;
+          try {
+            mkdirSync(pollPyDir, { recursive: true });
+            writeFileSync(pollPyPath, POLL_SCRIPT, "utf-8");
+          } catch {
+            degraded = true;
+          }
+
+          const result: Record<string, unknown> = {
+            submitted: true, session_id, prompt_id: promptId,
+            poll_command: generatePollCommand({ sessionId: session_id }),
+          };
+
+          if (degraded) {
+            result.degraded = true;
+            result.hint = "prompt 已提交。~/.kimi-tunnel/ 写入失败已降级。检查目录权限，或手动 mkdir ~/.kimi-tunnel 后重试即可启用记忆脚本。";
+          } else {
+            result.hint = "prompt 已提交。将 poll_command 以 Bash(run_in_background=true) 执行，等待回执。";
+          }
+
           return {
-            content: [{
-              type: "text",
-              text: JSON.stringify({
-                submitted: true, session_id, prompt_id: promptId,
-                hint: "prompt 已提交。将 poll_command 以 Bash(run_in_background=true) 执行，等待回执。",
-                poll_command: generatePollCommand({ sessionId: session_id }),
-              }, null, 2),
-            }],
+            content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
           };
         }
 

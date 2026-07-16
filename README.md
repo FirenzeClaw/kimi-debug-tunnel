@@ -154,7 +154,8 @@ L3: 学习沉淀 (learn skill → 向量库)
 
 ### 前置条件
 
-- Node.js ≥ 22（`node:sqlite` 内置）
+- Node.js ≥ 22（`node:sqlite` 内置 + tsc 编译）
+- Python ≥ 3.7（后台轮询脚本 `poll_command` 运行时依赖）
 - Kimi Code CLI ≥ 0.22.3
 - Git Bash（Windows）或 bash
 

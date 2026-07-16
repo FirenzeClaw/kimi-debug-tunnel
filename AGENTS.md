@@ -1,6 +1,7 @@
 <!--
 修改记录（最近 — 完整历史见 CHANGELOG.md）:
-  2026-07-16 | kimi-code (fix) | poll-command Bash→Python 重写：消除 node 依赖（换 Python json.load 读锁），新增 LOCK_LOST 重试（5×3s → exit 4），修复子 shell 变量丢失（单 Python 进程），退出码扩展为 0/2/3/4；shell wrapper 缩减为 1 行 PYTHONIOENCODING=utf-8 python3 -c "..." || python -c "..."
+  2026-07-16 | kimi-code (feat) | v2.16 预置脚本 + 降级回调：POLL_SCRIPT 常量 + existsSync 短命令分支（~/.kimi-tunnel/poll.py 存在时 ~4KB→~100 bytes）；execute_prompt/chat_with_session 自动 writeFile 写 poll.py，失败降级不阻塞；fetch_result 新增 poll-result-{sid}.txt 固定路径结果文件（PM Read 零 token）；路径 Win/Linux 规范化
+  2026-07-16 | kimi-code (fix) | poll-command Bash→Python 重写（v2.15）：消除 node 依赖（换 Python json.load 读锁），新增 LOCK_LOST 重试（5×3s → exit 4），修复子 shell 变量丢失（单 Python 进程），退出码扩展为 0/2/3/4；shell wrapper 缩减为 1 行
   2026-07-16 | kimi-code (feat) | 上下文长度 Bash 监控 + Session 规范统一（v2.14）：poll-command 新增 parse_context() + CTX_HIGH_THRESHOLD 三级阈值（环境变量 > ~/.kimi-tunnel/ctx-threshold > 36000）；逐条注入/session 复用优先/context_tokens 监控三条铁律收敛到 2 个 SKILL.md 入口，4 个 sub-guide 冗余清扫；session-retire cwd 修正跨项目场景（cwd=退役 session 实际工作目录，非 projectRoot）
   2026-07-16 | kimi-code (feat) | 跨项目记忆双层注入（v2.13）：buildInjection() 消费 profile.cwd → 全局正文 + 子项目索引导航表；6 个 memory_* MCP 工具 project 参数路由 + resolveProjectRoot 守卫；skill Q1b + guide-cross-project-memory.md 新建；9/9 测试通过
   2026-07-16 | kimi-code (fix) | Server 断联自主恢复规范：8 个 skill 文件（kimi-session-orchestrator 5 + session-retire + xmind-orchestrated + xmind）统一添加 R1-R4 恢复流程
@@ -109,9 +110,10 @@ npm run inspector    # MCP Inspector 调试模式
 ```
 
 **前置条件**：
-1. 启动 Kimi Server: `kimi web --no-open`（Tunnel 自动从 lock 文件检测端口）
-2. 设置 token: `export KIMI_SERVER_TOKEN="<printed-at-startup>"`
-3. 启动 Tunnel: `npm start`（或配置 `KIMI_SERVER_URL` 环境变量覆盖自动检测）
+1. Node.js ≥ 22 + Python ≥ 3.7（`poll_command` 纯 Python 后台轮询依赖 Python 运行时）
+2. 启动 Kimi Server: `kimi web --no-open`（Tunnel 自动从 lock 文件检测端口）
+3. 设置 token: `export KIMI_SERVER_TOKEN="<printed-at-startup>"`
+4. 启动 Tunnel: `npm start`（或配置 `KIMI_SERVER_URL` 环境变量覆盖自动检测）
 <!-- AUTO:END -->
 
 ## 项目约定

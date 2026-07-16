@@ -53,7 +53,7 @@ STEP 1 — 创建 session
 
 STEP 2 — 下发任务
   操作: execute_prompt(sid, task, auto_mode=true)
-  产出: { submitted: true, poll_command: "<bash>" }
+  产出: { submitted: true, poll_command: "<python3 ...>" }
   ✓ 门控: submitted=true 且 poll_command 非空
   ⛔ 完成此步后禁止做任何其他工具调用，立即进入 STEP 3
 

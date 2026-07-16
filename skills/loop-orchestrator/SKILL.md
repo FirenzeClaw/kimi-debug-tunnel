@@ -101,7 +101,7 @@ description: 当需要进行多轮次自动循环编排（实施/验收闭环）
 
 1. 不重复 poll — 每次调用消耗 token
 2. 一个后台 bash 只轮询一个 session — 多 session 用多个后台任务
-3. 收到通知后再读 output.log — 不提前 TaskOutput
+3. 收到通知后再读结果 — Read ~/.kimi-tunnel/poll-result-{sid}.txt（固定路径）或 output.log；不提前 TaskOutput
 4. auto_mode=true 时不需要手动审批
 5. create_session permission_mode="auto" 是 session 级别
 6. grade_step 不每次回复调用 — 仅在关键产出/修复后/交付前使用

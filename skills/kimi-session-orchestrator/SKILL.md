@@ -78,7 +78,7 @@ description: 当需要操作 kimi-session-orchestrator MCP 工具时使用
 
 1. **不要在同一 turn 内多次 poll** — 每次调用消耗 token，且 session 未完成时空等
 2. **一个后台 bash 任务只轮询一个 session** — 多 session 用多个后台任务
-3. **收到通知后再读 output.log** — 不要提前 TaskOutput
+3. **收到通知后再读结果** — 用 `Read ~/.kimi-tunnel/poll-result-{sid}.txt`（固定路径）或通知附带的 output.log；不要提前 TaskOutput
 4. **auto_mode=true 时不需要手动审批** — 工具调用自动通过
 5. **create_session 的 permission_mode="auto" 是 session 级别** — 后续 prompt 也需 auto_mode=true
 
@@ -86,7 +86,7 @@ description: 当需要操作 kimi-session-orchestrator MCP 工具时使用
    → PM 审查 → 再发下一步。严禁一条 prompt 包多个操作。
 7. **⛔ Session 复用优先** — 同模块连续工作同 session 继续；新建仅限：上下文超限 /
    产出质量下降 / 模块切换。
-8. **context_tokens 监控**（v2.14）— bash 轮询完成时自动检查；> 36K 输出
+8. **context_tokens 监控**（v2.14）— 轮询完成时自动检查；> 36K 输出
    `[CTX_HIGH]` 提醒退役。
 
 ---

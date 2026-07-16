@@ -2,6 +2,17 @@
 
 All notable changes to kimi-session-orchestrator.
 
+## v2.16 — 2026-07-16
+
+**Poll Command 预置脚本 + 降级 + 固定路径结果文件**
+
+- `poll-command.ts`: 提取 `POLL_SCRIPT` 模块级常量；`generatePollCommand()` 新增 `existsSync(~/.kimi-tunnel/poll.py)` 检测 —— 存在则返回短命令 `python3 ~/.kimi-tunnel/poll.py <args>`（~100 bytes），不存在降级为内联脚本（行为不变）
+- `execute-prompt.ts` / `chat-with-session.ts`: 首次调用自动 `writeFile` 写入 `poll.py`，失败时追加 `degraded: true` + 降级提示，零阻塞
+- `fetch_result()`: 新增 `poll-result-{sid}.txt` 文件写入（`~/.kimi-tunnel/`），PM 可用 `Read` 固定路径直接获取结果，零 token 消耗；sid 隔离并行 session 无竞态
+- 路径规范化：Windows `\` → `/`（Win/Linux 兼容）
+- 设计文档: `docs/superpowers/specs/2026-07-16-poll-py-prebuilt-degraded-design.md`
+- 实现计划: `docs/superpowers/plans/2026-07-16-poll-py-prebuilt-degraded.md`
+
 ## v2.15 — 2026-07-16
 
 **Poll Command Bash → Python 重写**

@@ -149,9 +149,10 @@ PM 拆解 → create_session → execute_prompt("执行 X，完成后用 selftes
 ③ Bash(run_in_background=true, command=poll_command)
    → 后台轮询，完成时自动通知
 
-④ 等待 <notification> → 读取 output.log → 拿到回复
+④ 等待 <notification> → Read ~/.kimi-tunnel/poll-result-{sid}.txt → 拿到回复
+   （或读取通知附带的 output.log 路径）
 
-> ⛔ **poll_command 必须原样使用，禁止手写改写。** `execute_prompt` 返回的 `poll_command` 已正确格式化（v2.8.4）：`fetch_result` 用 Python `urllib.request` 直连 HTTP（无 curl 管道截断）+ `PYTHONIOENCODING=utf-8`。**直接传给 Bash，一字不改。**
+> ⛔ **poll_command 必须原样使用，禁止手写改写。** v2.16 起 poll_command 为纯 Python 脚本（短命令 `python3 ~/.kimi-tunnel/poll.py <args>` 或降级内联版），`fetch_result` 自动写入 `~/.kimi-tunnel/poll-result-{sid}.txt`。**直接传给 Bash，一字不改。**
 
 ---
 ## 八、状态含义
