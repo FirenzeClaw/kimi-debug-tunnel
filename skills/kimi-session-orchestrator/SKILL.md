@@ -31,6 +31,16 @@ description: 当需要操作 kimi-session-orchestrator MCP 工具时使用
 - **B: PM 统筹 — 长轮次编排验收修复** → 回答后 Read `~/.agents/skills/kimi-session-orchestrator/guide-orchestration.md`
 - **C: 执行者** → 回答后 Read `~/.agents/skills/kimi-session-orchestrator/guide-execute.md`
 
+#### Q1b: 子项目路径分离确认（仅 Q1=A 或 B 时追问）
+
+规划中心（当前目录）与开发项目在不同路径时，子项目有自己的 `.kimi-tunnel/memory.db`。v2.13 起支持双层记忆注入——全局决策自动传播 + 子项目规范独立存储。
+
+非 auto 模式用 AskUserQuestion，auto 模式用纯文本提问：
+- **是，分离**：子项目在独立路径，需读其 `.kimi-tunnel/memory.db` → 回答后 Read `~/.agents/skills/kimi-session-orchestrator/guide-cross-project-memory.md`
+- **否**：所有工作在同一项目下，使用默认单层记忆注入
+
+> Q1b 跳过情况：若用户任务不涉及创建子 session（如纯审查、纯问答），可跳过追问。
+
 ### 第二轮：Q2 — 目标与追问
 
 #### Q2a: 最终目标？（通用）

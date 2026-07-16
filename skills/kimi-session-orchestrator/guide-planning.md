@@ -205,13 +205,15 @@ PM 拆解 → create_session → execute_prompt("执行 X，完成后用 selftes
 | `get_tunnel_status` | 隧道自身状态（wireConnected, 客户端数, 运行时间） |
 
 ### 共享记忆
-| 工具 | 用途 |
-|------|------|
-| `memory_set` | 写入键值对到命名空间 |
-| `memory_get` | 读取记忆条目 |
-| `memory_list` | 列出命名空间 |
-| `memory_status` | 知识库全景 |
-| `memory_archive` | 归档 session findings → L1 learnings |
+| 工具 | 用途 | 关键参数 |
+|------|------|----------|
+| `memory_set` | 写入键值对到命名空间 | `namespace`, `key`, `value`, `project`（可选） |
+| `memory_get` | 读取记忆条目 | `namespace`, `key`（可选）, `project`（可选） |
+| `memory_list` | 列出命名空间 | `namespace`（可选）, `project`（可选） |
+| `memory_status` | 知识库全景 | `project`（可选） |
+| `memory_archive` | 归档 session findings → L1 learnings | `session_id`, `project`（可选） |
+
+> `project` 参数用于跨项目记忆路由（v2.13+）。不加时行为不变。详见 `guide-cross-project-memory.md`。
 
 ### 工作流模板
 | 工具 | 用途 |
