@@ -155,8 +155,6 @@ Tunnel 每 10s 自动检测 lock 并重试连接。等待 ≤30s。
 - 检查后台 Bash 任务：`TaskList` 查看是否因断连异常退出 → 重建
 - 断连前已提交的 prompt 不受影响——继续原流程
 
-> 详细流程见 `skills/loop-orchestrator/guide-loop-core.md §9`（含断连期间保障、恢复后必做清单）。
-
 > 原 xmind skill 保留在 `~/.agents/skills/xmind/`，作为独立使用的备选方案。
 >
 > zoom-out skill 来源：https://github.com/mattpocock/skills，非本项目创建。不可用时本 skill 已内置手动 fallback。

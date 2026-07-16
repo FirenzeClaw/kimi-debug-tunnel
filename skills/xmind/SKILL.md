@@ -186,5 +186,3 @@ Tunnel 每 10s 自动检测 lock 并重试连接。等待 ≤30s。
 - 检查活跃 task session：`poll_session` 逐个确认状态
 - 检查后台 Bash 任务：`TaskList` 查看是否因断连异常退出 → 重建
 - 断连前已提交的 prompt 不受影响——继续原流程
-
-> 详细流程见 `skills/loop-orchestrator/guide-loop-core.md §9`（含断连期间保障、恢复后必做清单）。
