@@ -401,22 +401,19 @@ export class WireClient implements ISessionClient, IStatusClient, IPushClient {
     // Update session state cache
     const cached = this.sessionStateCache.get(sessionId) || { status: "unknown", updatedAt: 0 };
 
+    // 0.22.x 事件模型：status 枚举直通
     if (type === "event.session.status_changed" && payload?.status) {
-      cached.status = payload.status as string;
-      cached.updatedAt = Date.now();
-      this.sessionStateCache.set(sessionId, cached);
+      this.applySessionStatus(sessionId, payload.status as string);
+    }
 
-      // Notify waiting sendPrompt calls
-      const resolvers = this.statusResolvers.get(sessionId);
-      if (resolvers && resolvers.length > 0) {
-        const status = payload.status as string;
-        if (status === "idle" || status === "aborted") {
-          for (const r of resolvers) r.resolve(status);
-          this.statusResolvers.delete(sessionId);
-        } else if (status === "awaiting_approval") {
-          const resolver = resolvers[0];
-          if (resolver) resolver.resolve("awaiting_approval");
-        }
+    // 0.24+ 事件模型：work_changed 携带 busy/pending_interaction（status_changed 不再发送）
+    if (type === "event.session.work_changed" && payload) {
+      const mapped = normalizeSessionStatus(
+        { busy: payload.busy as boolean | undefined },
+        { pending_interaction: payload.pending_interaction as string | undefined }
+      );
+      if (mapped !== "unknown") {
+        this.applySessionStatus(sessionId, mapped);
       }
     }
 
@@ -454,6 +451,26 @@ export class WireClient implements ISessionClient, IStatusClient, IPushClient {
           }, null, 2), "utf-8");
         } catch {}
       }
+    }
+  }
+
+  /**
+   * 统一的状态落点：更新 WS 缓存并唤醒 waitForStatus resolver。
+   * idle/aborted 唤醒全部并清空队列；awaiting_approval 只唤醒首个（保留队列等最终态）。
+   */
+  private applySessionStatus(sessionId: string, status: string): void {
+    const cached = this.sessionStateCache.get(sessionId) || { status: "unknown", updatedAt: 0 };
+    cached.status = status;
+    cached.updatedAt = Date.now();
+    this.sessionStateCache.set(sessionId, cached);
+
+    const resolvers = this.statusResolvers.get(sessionId);
+    if (!resolvers || resolvers.length === 0) return;
+    if (status === "idle" || status === "aborted") {
+      for (const r of resolvers) r.resolve(status);
+      this.statusResolvers.delete(sessionId);
+    } else if (status === "awaiting_approval") {
+      resolvers[0]?.resolve("awaiting_approval");
     }
   }
 
