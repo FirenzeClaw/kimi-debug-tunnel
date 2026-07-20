@@ -60,3 +60,19 @@ test("turn.started → 清除残留 lastError（防上一轮失败误抛）", ()
   c.handleDirectEvent({ type: "turn.started", payload: { turnId: 2, session_id: "s1" } });
   assert.equal(c.sessionStateCache.get("s1").lastError, undefined);
 });
+
+
+test("turn.ended cancelled → lastError 为 turn cancelled", () => {
+  const c = makeStubClient();
+  c.handleDirectEvent({ type: "turn.ended", payload: { reason: "cancelled", session_id: "s1" } });
+  assert.equal(c.sessionStateCache.get("s1").lastError, "turn cancelled");
+});
+
+test("turn.ended failed 无 code 有 message → lastError 保留 message", () => {
+  const c = makeStubClient();
+  c.handleDirectEvent({
+    type: "turn.ended",
+    payload: { reason: "failed", error: { message: "context overflow" }, session_id: "s1" },
+  });
+  assert.equal(c.sessionStateCache.get("s1").lastError, "context overflow");
+});

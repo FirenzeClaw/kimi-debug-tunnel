@@ -444,7 +444,7 @@ export class WireClient implements ISessionClient, IStatusClient, IPushClient {
         const errObj = payload?.error as { code?: string; message?: string } | undefined;
         cached.lastError = errObj?.code
           ? `[${errObj.code}] ${errObj.message || ""}`.trim()
-          : `turn ${reason}`;
+          : errObj?.message || `turn ${reason}`;
         this.sessionStateCache.set(sessionId, cached);
       } else if (reason === "completed") {
         delete cached.lastError;
