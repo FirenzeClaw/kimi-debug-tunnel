@@ -108,7 +108,7 @@ export class WireClient implements ISessionClient, IStatusClient, IPushClient {
   private sessionModels = new Map<string, string>();
   private serverDefaultModel: string | null = null;
   // WS-pushed session state cache — zero-I/O alternative to wire.jsonl parsing
-  private sessionStateCache = new Map<string, { status: string; lastTurnId?: number; lastText?: string; updatedAt: number }>();
+  private sessionStateCache = new Map<string, { status: string; lastTurnId?: number; lastText?: string; lastError?: string; updatedAt: number }>();
   // Optional watch output: write completion status to a file for coordinating session
   private watchOutputPath: string | null = null;
   private watchAssistantText = "";
@@ -436,7 +436,19 @@ export class WireClient implements ISessionClient, IStatusClient, IPushClient {
     }
 
     if (type === "turn.ended") {
-      process.stderr.write(`[wire-client] Turn ended for ${sessionId}: ${payload?.reason || "unknown"}\n`);
+      const reason = payload?.reason as string | undefined;
+      // 失败信号入缓存：sendPrompt 等待结束后据此显式抛错（0.27 实测 turn.ended 含 error{code,message}）
+      if (reason === "failed" || reason === "cancelled") {
+        const errObj = payload?.error as { code?: string; message?: string } | undefined;
+        cached.lastError = errObj?.code
+          ? `[${errObj.code}] ${errObj.message || ""}`.trim()
+          : `turn ${reason}`;
+        this.sessionStateCache.set(sessionId, cached);
+      } else if (reason === "completed") {
+        delete cached.lastError;
+        this.sessionStateCache.set(sessionId, cached);
+      }
+      process.stderr.write(`[wire-client] Turn ended for ${sessionId}: ${reason || "unknown"}\n`);
     }
 
     // ── Watch output (for coordinating session) ──────────────────────────────
@@ -723,6 +735,12 @@ export class WireClient implements ISessionClient, IStatusClient, IPushClient {
       Math.max(remainingTimeout, 10000),
       autoApprove
     );
+
+    // Step 2.5: turn 失败显式抛错（WS 事件路径；REST 兜底路径无事件，保持拉空回复的旧行为）
+    const postTurn = this.sessionStateCache.get(sessionId);
+    if (postTurn?.lastError) {
+      throw new Error(`Turn failed for session ${sessionId}: ${postTurn.lastError}`);
+    }
 
     // Step 3: Fetch the response messages using semantic method
     const allMessages = await this._fetchSessionMessages(sessionId, { pageSize: 50, role: "assistant" });
