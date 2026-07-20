@@ -83,6 +83,7 @@ test("watch: assistant.delta 累积 + turn.started 重置（0.27 无 prompt.subm
   assert.equal(c.watchAssistantText, "abc");
   c.handleDirectEvent({ type: "turn.started", payload: { turnId: 2, session_id: "s1" } });
   assert.equal(c.watchAssistantText, "");
+  assert.equal(c.watchPromptCount, 0); // turn.started 只重置文本，不计数
 });
 
 test("watch: prompt.submitted 仍重置并计数（0.22.x 兼容）", () => {
