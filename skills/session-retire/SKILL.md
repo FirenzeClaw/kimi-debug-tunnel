@@ -102,9 +102,23 @@ description: Use when retiring a task session and spawning a successor with full
    memory_set(namespace="session/<retiring_id>/handoff", key="pending",  value="<JSON 数组>")
    memory_set(namespace="session/<retiring_id>/handoff", key="decisions", value="<文本>")
    → 结构化 handoff 数据。新 session 通过 memory_get 精确读取。
+
+⑦ 服务端归档（v2.18 新增，需 0.24+ 引擎）：
+   # 可选：先导出留档（ZIP 含 manifest.json + 完整消息）
+   PORT=$(python -c "import json,os;print(json.load(open(os.path.expanduser('~/.kimi-code/server/lock')))['port'])" 2>/dev/null || python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/.kimi-code/server/lock')))['port'])")
+   curl -s -X POST -H "Authorization: Bearer $(cat ~/.kimi-code/server.token)" \
+     -H "Content-Type: application/json" -d '{}' \
+     "http://127.0.0.1:${PORT}/api/v1/sessions/<retiring_id>/export" \
+     -o ~/.kimi-tunnel/export-<retiring_id>.zip
+
+   # 归档（归档后 session 从 REST 列表消失，wire.jsonl 仍保留在磁盘）
+   curl -s -X POST -H "Authorization: Bearer $(cat ~/.kimi-code/server.token)" \
+     -H "Content-Type: application/json" -d '{}' \
+     "http://127.0.0.1:${PORT}/api/v1/sessions/<retiring_id>:archive"
+   → 期望 {"code":0,"data":{"archived":true}}
 ```
 
-**完成标准**：memory_archive 返回成功 + 3 条 memory_set 全部写入。若 session 无有价值的发现，memory_archive 可跳过（但 handoff 数据必须写入）。
+**完成标准**：memory_archive 返回成功 + 3 条 memory_set 全部写入 + `:archive` 返回 `archived:true`（0.24+）。若 session 无有价值的发现，memory_archive 可跳过（handoff 数据必须写入）；`:archive`/`:export` 失败（老引擎不支持或网络异常）降级为仅记忆归档，不阻塞 pipeline，汇报中注明降级。
 
 ### Phase 3 — 构建 7-Block 上下文模板
 
@@ -213,6 +227,7 @@ description: Use when retiring a task session and spawning a successor with full
 | 退役 session 仍活跃（未 idle） | 等待其完成当前 turn → 继续。不强制中断正在执行的 session。 |
 | 批量退役多个 session | 逐个处理。每个完整的 Phase 1→5 后再开始下一个。汇报时汇总。 |
 | **退役 session 在子项目路径** | cwd 是退役 session 实际工作目录（如 D:/code/cli-research/mycli），不是项目根（D:/code/cli-research），更不是 PM 项目根（D:/code/kimi-session-orchestrator） | Phase 1 步骤 1 wirePath 解析出末段目录名 → 步骤 2 pwd 确认 → 步骤 3 交叉验证。IO 中频繁出现的子目录路径不能作为 cwd；v2.13 双层记忆自动按 cwd 选正确的 memory.db |
+| 服务端 `:archive` 失败（老引擎/网络异常） | 归档是增强而非必需：wire.jsonl 仍在磁盘，list_sessions 走文件解析不受影响 | Phase 2 步骤⑦捕获非 0 code 即降级，继续 Phase 3，汇报注明 |
 
 ## Common Mistakes
 
