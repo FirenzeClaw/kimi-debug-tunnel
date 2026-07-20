@@ -153,13 +153,21 @@ L3: 学习沉淀 (learn skill → 向量库)
 
 | 文档 | 说明 |
 |------|------|
-| [API.md](API.md) | Kimi Server REST API（51 端点） |
+| [API.md](API.md) | Kimi Server API 0.27.0 实测版（v1 REST + v1/v2 WS，含 11 项破坏性变更清单） |
 | [docs/coordinator-guide.md](docs/coordinator-guide.md) | PM 统筹准入规范 |
 | [docs/loop-engineering-analysis.md](docs/loop-engineering-analysis.md) | Loop Engineering 概念与项目对照 |
 | [docs/loop-engineering-reference.md](docs/loop-engineering-reference.md) | Loop Engineering 全面参考（16 章，7 篇来源聚合） |
 | [specs/](specs/) | 7 个功能规格（001-007，含 cross-model grader 与 cron-scheduler） |
 | [docs/superpowers/specs/](docs/superpowers/specs/) | 架构设计文档（含 Loop Contract 双 Skill 设计） |
-| [docs/issues/](docs/issues/) | 已修复问题记录（5 个） |
+| [docs/issues/](docs/issues/) | 已修复问题记录（6 个，含 0.27 Web 引擎适配全记录） |
+
+## 远期调研（Roadmap)
+
+| 方向 | 现状 | 价值 |
+|------|------|------|
+| **v2 channel RPC 迁移** | 0.24+ 引擎的 37 个 channel 已可自省（`GET /api/v2/channels`），但 `/api/v2/ws` 调用帧格式未确认（19 种候选帧实测均被静默忽略），需 Web UI 流量逆向或官方文档 | `agentRPCService` 统一 RPC 面：goal 生命周期、plan/swarm 模式、compaction 控制、runShellCommand、task output——v1 REST 没有或不顺的能力 |
+| `goal` 端点接入 loop-orchestrator | `GET /sessions/{id}/goal` 已实测可用，编排侧未接入 | 目标模式编排的原生化 |
+| 单 prompt 多 `turn.started` 场景 | 观察项，当前无症状 | watch 输出在该场景可能截断 |
 
 ## 安装与部署
 
