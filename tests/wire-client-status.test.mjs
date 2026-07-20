@@ -75,3 +75,21 @@ test("旧事件 status_changed 仍生效（0.22.x 兼容）", () => {
   });
   assert.equal(c.getCachedStatus("s1"), "idle");
 });
+
+test("watch: assistant.delta 累积 + turn.started 重置（0.27 无 prompt.submitted 的兜底）", () => {
+  const c = makeClient();
+  c.watchOutputPath = "x"; // 仅开启累积分支，不触发写文件
+  c.handleDirectEvent({ type: "assistant.delta", payload: { delta: "abc", session_id: "s1" } });
+  assert.equal(c.watchAssistantText, "abc");
+  c.handleDirectEvent({ type: "turn.started", payload: { turnId: 2, session_id: "s1" } });
+  assert.equal(c.watchAssistantText, "");
+});
+
+test("watch: prompt.submitted 仍重置并计数（0.22.x 兼容）", () => {
+  const c = makeClient();
+  c.watchOutputPath = "x";
+  c.handleDirectEvent({ type: "assistant.delta", payload: { delta: "abc", session_id: "s1" } });
+  c.handleDirectEvent({ type: "prompt.submitted", payload: { session_id: "s1" } });
+  assert.equal(c.watchAssistantText, "");
+  assert.equal(c.watchPromptCount, 1);
+});

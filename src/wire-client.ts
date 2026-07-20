@@ -441,8 +441,9 @@ export class WireClient implements ISessionClient, IStatusClient, IPushClient {
 
     // ── Watch output (for coordinating session) ──────────────────────────────
     if (this.watchOutputPath) {
-      if (type === "prompt.submitted") {
-        this.watchPromptCount++;
+      // 0.27 无 prompt.submitted 事件，turn.started 作为重置兜底（0.22.x 重置两次无害）
+      if (type === "prompt.submitted" || type === "turn.started") {
+        if (type === "prompt.submitted") this.watchPromptCount++;
         this.watchAssistantText = "";
       }
       if (type === "assistant.delta") {
