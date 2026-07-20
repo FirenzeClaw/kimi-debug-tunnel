@@ -18,6 +18,7 @@
  * compatibility.
  *
  * Modification history:
+ *   2026-07-20 | kimi-code (fix) | 0.24+ 适配：status 枚举 → busy/pending_interaction 双模型判定，消除 SERVER_OFFLINE 误报；busy=False 补查 pending_interaction 防审批中间态提前退出
  *   2026-07-16 | kimi-code (feat) | v2.16 预置脚本 + 降级：POLL_SCRIPT 常量、existsSync 短命令分支、fetch_result 写入 poll-result-{sid}.txt；路径规范化 \→/
  *   2026-07-16 | kimi-code (fix) | Bash→Python 重写：消除 node 依赖、LOCK_LOST 重试、退出码扩展 0/2/3/4
  *   2026-07-16 | kimi-code (feat) | v2.14 新增 parse_context() + CTX_HIGH 阈值检测
@@ -124,6 +125,18 @@ export const POLL_SCRIPT = [
   "            status = 'running'",
   "        elif sdata.get('busy') is False:",
   "            status = 'idle'",
+  "            # 0.24+ 补查 pending_interaction: approval/question 暂停时 busy=false 但 turn 未完结",
+  "            # （与 wire-client getSessionStatus 同一策略；取值 approval/question 为推断，未命中则保持 idle 兜底）",
+  "            try:",
+  "                req2 = make_req(f'/api/v1/sessions/{sid}')",
+  "                d2 = json.load(urllib.request.urlopen(req2, timeout=10))",
+  "                pi = d2.get('data', {}).get('pending_interaction', 'none')",
+  "                if pi == 'approval':",
+  "                    status = 'awaiting_approval'",
+  "                elif pi == 'question':",
+  "                    status = 'awaiting_question'",
+  "            except Exception:",
+  "                pass",
   "        ctx_tokens = sdata.get('context_tokens', '')",
   "        ctx_max = sdata.get('max_context_tokens', '')",
   "    except Exception:",
