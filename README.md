@@ -3,7 +3,7 @@
 # Kimi Session Orchestrator
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-v2.17-brightgreen)]()
+[![Version](https://img.shields.io/badge/version-v2.17.1-brightgreen)]()
 [![Node](https://img.shields.io/badge/node-%E2%89%A5%2022-339933)]()
 [![Python](https://img.shields.io/badge/python-%E2%89%A5%203.7-3776AB)]()
 [![MCP Tools](https://img.shields.io/badge/MCP%20tools-29-orange)]()

@@ -118,7 +118,7 @@
   "message_count": 0, "last_seq": 0
 }
 ```
-> ⛔ **破坏性**: `status`（idle/running/awaiting_approval/...）字段已**移除**，替换为 `busy` + `main_turn_active` + `pending_interaction` 三元组（`last_prompt` 保留，并新增 `last_turn_reason`: completed/failed/...）。`pending_interaction` 取值 ⚠️ 推断为 `none|approval|question`（0.27 实测确认 `none`；枚举全值来自二进制 schema 引用）。
+> ⛔ **破坏性**: `status`（idle/running/awaiting_approval/...）字段已**移除**，替换为 `busy` + `main_turn_active` + `pending_interaction` 三元组（`last_prompt` 保留，并新增 `last_turn_reason`: completed/failed/...）。`pending_interaction` 取值 `none|approval|question`（0.27 全部实测确认）。**注意：审批/提问等待期间 `busy` 仍为 `true`**——状态推导必须 `pending_interaction` 优先于 `busy`（v2.17.1 修正）。
 
 **GET /status 响应 data**（0.27.0 实测，⚠️ 结构已变）:
 ```json
@@ -198,7 +198,7 @@
 | GET | `/api/v1/sessions/{id}/approvals?status=pending` | 列出待审批请求（⛔ **`status` 查询参数变为必需**，缺省返回 `40001`） |
 | POST | `/api/v1/sessions/{id}/approvals/{approval_id}` | **处理审批**（核心接口） |
 
-**审批请求体**:
+**审批请求体**（0.27 实测 `{decision:"approved"}` 可用）:
 ```json
 {
   "decision": "approved|rejected|cancelled",
@@ -208,6 +208,8 @@
 }
 ```
 
+**pending 审批项结构**（0.27 实测）: `{approval_id, session_id, turn_id, tool_call_id, tool_name, action, tool_input_display, created_at, expires_at}`（`approval_id` 即 tool_call_id；`action` 为人类可读描述如 `"Running: echo hello"`；`expires_at` 约 24h）
+
 ---
 
 ### 1.8 Questions — 用户提问
@@ -215,7 +217,11 @@
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/v1/sessions/{id}/questions?status=pending` | 列出待回答问题（⛔ `status` 同样必需） |
-| POST | `/api/v1/sessions/{id}/questions/{tail}` | 回答或 dismiss |
+| POST | `/api/v1/sessions/{id}/questions/{question_id}` | 回答或 dismiss |
+
+**pending 问题项结构**（0.27 实测）: `{question_id, session_id, questions: [{id, question, options: [{id, label, description}], allow_other}]}`
+
+**回答请求体**: `answers` 必须是 **record（对象）而非数组**（实测数组返回 `40001: expected record, received array`），如 `{"answers": {"q_0": "茶"}}`
 
 ---
 
@@ -445,7 +451,7 @@ S→C  {"type":"ack","id":"s1","code":0,"msg":"success",
 旧 (0.22.3): GET /status → data.status == "idle" / "awaiting_approval"
 新 (0.27.0): GET /status → data.busy == false 即空闲
              GET /sessions/{id} → pending_interaction != "none" 即等待人工介入
-             （awaiting_approval ≈ pending_interaction == "approval"）⚠️ 枚举值待实测
+             （awaiting_approval = pending_interaction == "approval"，实测确认；审批/提问期间 busy 仍为 true，pi 优先于 busy）
 ```
 
 ### 4.3 自动审批模式

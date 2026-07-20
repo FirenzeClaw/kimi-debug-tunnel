@@ -109,21 +109,21 @@
 
 ## 七、未覆盖项清单（2026-07-20 整理，已合并 master v2.17）
 
-### P1 — 正确性待确认
+### P1 — 正确性待确认 → ✅ 已全部实测闭环（v2.17.1）
 
-| # | 事项 | 现状 | 验证方式 |
-|---|------|------|----------|
-| 1 | `pending_interaction` 的 `approval`/`question` 取值 | 推断值，未实测；归一化层精确匹配，未命中落 `idle` 兜底（不致错，但审批态会被当空闲） | manual session 触发真实工具审批，读 `GET /sessions/{id}` 的 `pending_interaction` |
-| 2 | 0.22.3 既有问题：未加载 session 的 `/status` 返回 50001 → poll 误报 SERVER_OFFLINE | 0.22.3 实测存在（审查副产发现）；0.27 下是否修复未验证 | 0.27 下对一个未加载的老 session 调 `/status` |
+| # | 事项 | 实测结论 |
+|---|------|----------|
+| 1 | `pending_interaction` 取值 | ✅ `none`/`approval`/`question` 三值全部实测确认（manual session 真实审批 + AskUserQuestion 场景）。**重要新发现：审批/提问等待期间 `busy` 仍为 `true`**——原归一化规则（busy 优先）会把审批态误判为 `running`，PM 审批监听将漏报。已修（pi 优先于 busy，normalizeSessionStatus + getSessionStatus 新模型下恒取详情，+3 单测） |
+| 2 | 未加载 session 的 `/status` 50001 | ✅ 0.27 已修复——最老 session 的 `/status` 正常返回 `{busy, model, thinking_level, permission, ...}`（注意：0.27 的 `/status` 在 model 已设置时还返回 `model` 字段） |
 
 ### P2 — 功能增强（下一迭代候选）
 
-| # | 事项 | 说明 |
-|---|------|------|
-| 3 | `session-retire` skill 接入 `:archive` + `POST /export` | 退役时服务端归档（session 从列表消失）+ ZIP 导出留档 |
-| 4 | `sendPrompt` 对 `prompt.completed` 的 `reason: failed` 显式报错 | 当前 turn 失败时会拉到空回复而不报错（如 model.not_configured 场景），应从事件或 `last_turn_reason` 识别失败 |
-| 5 | skills/ 文档 curl 示例全面核对 | `?status=pending` 等参数逐例核对（grep 已确认无 status 枚举残留，参数细节未逐例过） |
-| 6 | npm `test` script 接入 | `node --test tests/*.test.mjs`（质量审查建议；当前 20 例只能手动逐文件跑） |
+| # | 事项 | 研究结论 |
+|---|------|----------|
+| 3 | `session-retire` skill 接入 `:archive` + `POST /export` | 端点均已实测：`:archive` 后 session 从列表消失（REST 不可列）；`/export` 返回 ZIP（含 manifest.json）。接入点明确，待实施 |
+| 4 | `sendPrompt` 对 turn 失败显式报错 | 失败信号已实测齐全：`turn.ended.reason=failed` + `error{code,message,retryable}` 事件、`prompt.completed.reason`、`last_turn_reason` 字段。sendPrompt 可在 waitForStatus 后检查 last_turn_reason 或捕获 error 事件，待实施 |
+| 5 | skills/ 文档 curl 示例 | ✅ 核对完毕：skills/ 无 API curl 示例，AGENTS.md 审批示例已带 `?status=pending`，无需改 |
+| 6 | npm `test` script | ✅ 已落地：`npm test` → `node --test tests/*.test.mjs`（23/23 通过） |
 
 ### P3 — 远期/研究
 
@@ -136,10 +136,11 @@
 
 | # | 事项 | 说明 |
 |---|------|------|
-| 9 | `git push` 未执行 | master 本地领先 origin/master 13 个 commit，等指令 |
+| 9 | `git push` 未执行 | master 本地领先 origin/master，等指令 |
 | 10 | `feat/web-engine-0.27-adaptation` 分支已合并 | 可删 |
 
 ### 已闭环（本轮顺手修掉）
 
 - AGENTS.md `build` 注释补 userscript 构建步骤（生产回归中任务 session 审查发现）
 - API.md §五 #3 WS ack 帧影响面口径与 issue 文档统一（同审查发现）
+- API.md：approvals/questions 结构实测回填（pending 项字段、answers 为 record 非数组）

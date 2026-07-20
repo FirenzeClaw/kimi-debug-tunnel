@@ -4,9 +4,9 @@
  *
  * 内部词表: idle | running | awaiting_approval | awaiting_question | aborted | unknown
  * 映射规则（0.27.0 实测，见 API.md §五）:
+ *   pending_interaction=approval → awaiting_approval（优先于 busy——审批等待时 busy 仍为 true）
+ *   pending_interaction=question → awaiting_question（同理）
  *   busy=true                     → running
- *   busy=false + approval         → awaiting_approval
- *   busy=false + question         → awaiting_question
  *   busy=false + none/无详情       → idle
  * 两模型字段均缺失                → unknown（不误判为 offline/idle）
  * status 与 busy 同时存在          → status 优先（前向兼容）
@@ -38,13 +38,11 @@ export function normalizeSessionStatus(
   if (typeof statusBody.status === "string" && statusBody.status) {
     return statusBody.status;
   }
-  // 新模型：busy 判定
+  // 新模型：pending_interaction 优先于 busy（0.27 实测：审批/提问等待时 busy 仍为 true）
+  const pending = sessionBody?.pending_interaction;
+  if (pending === "approval") return "awaiting_approval";
+  if (pending === "question") return "awaiting_question";
   if (statusBody.busy === true) return "running";
-  if (statusBody.busy === false) {
-    const pending = sessionBody?.pending_interaction;
-    if (pending === "approval") return "awaiting_approval";
-    if (pending === "question") return "awaiting_question";
-    return "idle";
-  }
+  if (statusBody.busy === false) return "idle";
   return "unknown";
 }

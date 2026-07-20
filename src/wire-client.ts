@@ -772,10 +772,10 @@ export class WireClient implements ISessionClient, IStatusClient, IPushClient {
       const statusBody = await this.transport.apiGet<StatusEndpointBody>(
         `/api/v1/sessions/${sessionId}/status`
       );
-      // 0.24+ busy 模型下 busy==false 时，/status 不含 pending_interaction，
-      // 需补取 session 详情区分 idle 与 awaiting_approval/awaiting_question
+      // 0.24+ busy 模型下 /status 不含 pending_interaction，需补取 session 详情；
+      // 实测审批/提问等待时 busy 仍为 true，故新模型下恒取详情（pi 优先于 busy）
       let sessionBody: SessionDetailBody | undefined;
-      if (statusBody.status === undefined && statusBody.busy === false) {
+      if (statusBody.status === undefined) {
         sessionBody = await this.transport.apiGet<SessionDetailBody>(
           `/api/v1/sessions/${sessionId}`
         );

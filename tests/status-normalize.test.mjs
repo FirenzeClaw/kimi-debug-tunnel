@@ -10,12 +10,20 @@ test("legacy: status enum passthrough", () => {
   assert.equal(normalizeSessionStatus({ status: "aborted" }), "aborted");
 });
 
-// ── 新模型（0.24+）：busy=true → running ──
+// ── 新模型（0.24+）：busy=true → running；但 pending_interaction 优先（实测：审批/提问时 busy 仍为 true） ──
 test("busy model: busy=true → running", () => {
   assert.equal(normalizeSessionStatus({ busy: true }), "running");
+});
+test("busy model: busy=true + approval → awaiting_approval（pi 优先）", () => {
   assert.equal(
     normalizeSessionStatus({ busy: true }, { pending_interaction: "approval" }),
-    "running"
+    "awaiting_approval"
+  );
+});
+test("busy model: busy=true + question → awaiting_question（pi 优先）", () => {
+  assert.equal(
+    normalizeSessionStatus({ busy: true }, { pending_interaction: "question" }),
+    "awaiting_question"
   );
 });
 

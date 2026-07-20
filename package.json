@@ -1,6 +1,6 @@
 {
   "name": "kimi-session-orchestrator",
-  "version": "2.17.0",
+  "version": "2.17.1",
   "description": "MCP debug tunnel server with HTTP+WebSocket console for Kimi Code CLI session orchestration",
   "main": "dist/index.js",
   "bin": {
@@ -10,7 +10,8 @@
     "build": "tsc && node scripts/build-userscript.mjs && node -e \"const{cpSync}=require('fs');cpSync('ext','dist/ext',{recursive:true});cpSync('shared','dist/shared',{recursive:true})\"",
     "start": "node dist/index.js",
     "dev": "tsc --watch",
-    "inspector": "npx @modelcontextprotocol/inspector node dist/index.js"
+    "inspector": "npx @modelcontextprotocol/inspector node dist/index.js",
+    "test": "node --test tests/*.test.mjs"
   },
   "keywords": [
     "mcp",

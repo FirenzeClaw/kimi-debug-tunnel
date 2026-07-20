@@ -36,7 +36,7 @@ import {
 export async function startMcpServer(services: TunnelServices): Promise<void> {
   const server = new McpServer({
     name: "kimi-session-orchestrator",
-    version: "2.17.0",
+    version: "2.17.1",
     description:
       "Kimi Code CLI 调试隧道 v2——通过 WebSocket Wire 协议实现推送式全自动化 session 统筹。支持多轮对话编排、实时流式响应、智能思考过滤。",
   });

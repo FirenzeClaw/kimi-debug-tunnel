@@ -25,6 +25,15 @@ test("work_changed: busy=true → running", () => {
   assert.equal(c.getCachedStatus("s1"), "running");
 });
 
+test("work_changed: busy=true + approval → awaiting_approval（实测：审批等待时 busy 仍为 true）", () => {
+  const c = makeClient();
+  c.handleDirectEvent({
+    type: "event.session.work_changed",
+    payload: { busy: true, pending_interaction: "approval", session_id: "s1" },
+  });
+  assert.equal(c.getCachedStatus("s1"), "awaiting_approval");
+});
+
 test("work_changed: busy=false + approval → awaiting_approval", () => {
   const c = makeClient();
   c.handleDirectEvent({

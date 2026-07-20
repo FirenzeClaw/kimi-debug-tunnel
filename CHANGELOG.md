@@ -2,6 +2,16 @@
 
 All notable changes to kimi-session-orchestrator.
 
+## v2.17.1 — 2026-07-20
+
+**P1 实测闭环：审批态映射修正 + 测试基建**
+
+- fix: 状态映射 `pending_interaction` 优先于 `busy`——0.27 实测审批/提问等待期间 `busy` 仍为 `true`，原规则（busy 优先）把审批态误判为 `running`，PM 审批监听漏报；`normalizeSessionStatus` 重排 + `getSessionStatus` 新模型下恒取 session 详情（`wire-client.ts`、`status-normalize.ts`，+3 单测锁定）
+- 实测确认：`pending_interaction` 枚举 `none|approval|question`（manual session 真实审批 + AskUserQuestion 场景）；审批决策 `POST approvals/{id} {decision:"approved"}` 全链路通；问题回答 `answers` 为 record 非数组
+- 实测确认：0.27 已修复 0.22.3「未加载 session `/status` 50001」问题
+- feat: `npm test` script（`node --test tests/*.test.mjs`，23 例）
+- docs: API.md approvals/questions 结构实测回填
+
 ## v2.17 — 2026-07-20
 
 **Web 引擎 0.24+/0.27 适配（Kimi Server Web 重构）**

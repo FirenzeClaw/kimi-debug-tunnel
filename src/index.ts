@@ -14,7 +14,7 @@ import { listSessions } from "./session-store.js";
 const PORT = parseInt(process.env.TUNNEL_PORT || "3456", 10);
 
 async function main(): Promise<void> {
-  process.stderr.write("[kimi-session-orchestrator] v2.17.0 Starting...\n");
+  process.stderr.write("[kimi-session-orchestrator] v2.17.1 Starting...\n");
 
   const wireClient = new WireClient();
   const messageQueue = new MessageQueue();
