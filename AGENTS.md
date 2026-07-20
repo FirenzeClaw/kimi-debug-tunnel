@@ -106,7 +106,7 @@ src/
 
 ```bash
 npm install          # 安装依赖
-npm run build        # tsc 编译 + 复制静态文件到 dist/
+npm run build        # tsc 编译 + userscript 构建 + 复制静态文件到 dist/
 npm start            # node dist/index.js（需先 build 且 Kimi Server 运行中）
 npm run dev          # tsc --watch
 npm run inspector    # MCP Inspector 调试模式

@@ -106,5 +106,40 @@
 
 1. ~~**P0** `getSessionStatus()` 归一化映射 + POLL_SCRIPT busy 判定~~（任务 1-3）
 2. ~~**P1** 运行中验证 + 运行时修复~~（任务 7-9：Fix A/B/C）
-3. **P2** session-retire 接入 `:archive` + `/export`；skills 文档 curl 示例核对（后续迭代）
-4. **P3**（远期）评估 v2 channel RPC 迁移
+
+## 七、未覆盖项清单（2026-07-20 整理，已合并 master v2.17）
+
+### P1 — 正确性待确认
+
+| # | 事项 | 现状 | 验证方式 |
+|---|------|------|----------|
+| 1 | `pending_interaction` 的 `approval`/`question` 取值 | 推断值，未实测；归一化层精确匹配，未命中落 `idle` 兜底（不致错，但审批态会被当空闲） | manual session 触发真实工具审批，读 `GET /sessions/{id}` 的 `pending_interaction` |
+| 2 | 0.22.3 既有问题：未加载 session 的 `/status` 返回 50001 → poll 误报 SERVER_OFFLINE | 0.22.3 实测存在（审查副产发现）；0.27 下是否修复未验证 | 0.27 下对一个未加载的老 session 调 `/status` |
+
+### P2 — 功能增强（下一迭代候选）
+
+| # | 事项 | 说明 |
+|---|------|------|
+| 3 | `session-retire` skill 接入 `:archive` + `POST /export` | 退役时服务端归档（session 从列表消失）+ ZIP 导出留档 |
+| 4 | `sendPrompt` 对 `prompt.completed` 的 `reason: failed` 显式报错 | 当前 turn 失败时会拉到空回复而不报错（如 model.not_configured 场景），应从事件或 `last_turn_reason` 识别失败 |
+| 5 | skills/ 文档 curl 示例全面核对 | `?status=pending` 等参数逐例核对（grep 已确认无 status 枚举残留，参数细节未逐例过） |
+| 6 | npm `test` script 接入 | `node --test tests/*.test.mjs`（质量审查建议；当前 20 例只能手动逐文件跑） |
+
+### P3 — 远期/研究
+
+| # | 事项 | 说明 |
+|---|------|------|
+| 7 | v2 channel RPC 迁移评估 | `agentRPCService` 提供统一 RPC 面（prompt/goal/plan/swarm/compaction）；但 `/api/v2/ws` 调用帧格式未确认（19 种候选帧实测均被静默忽略），需官方文档或 Web UI 流量逆向 |
+| 8 | `GET /sessions/{id}/goal` + `goal.updated` 事件在 loop-orchestrator 的利用 | 端点已实测可用，编排侧未接入 |
+
+### 运维杂项
+
+| # | 事项 | 说明 |
+|---|------|------|
+| 9 | `git push` 未执行 | master 本地领先 origin/master 13 个 commit，等指令 |
+| 10 | `feat/web-engine-0.27-adaptation` 分支已合并 | 可删 |
+
+### 已闭环（本轮顺手修掉）
+
+- AGENTS.md `build` 注释补 userscript 构建步骤（生产回归中任务 session 审查发现）
+- API.md §五 #3 WS ack 帧影响面口径与 issue 文档统一（同审查发现）

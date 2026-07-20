@@ -463,7 +463,7 @@ S→C  {"type":"ack","id":"s1","code":0,"msg":"success",
 |---|------|--------|----------|
 | 1 | **`GET /status` 移除 `data.status`**，改为 `{busy, thinking_level, permission, plan_mode, swarm_mode, context_tokens, max_context_tokens, context_usage}` | `wire-client.ts getSessionStatus()`、`poll-command.ts` Python 轮询 | `idle` 判定改 `busy==false`；`aborted` 需另找信号（turn.ended reason / snapshot）⚠️ |
 | 2 | **Session 对象移除 `status`**，新增 `busy` / `main_turn_active` / `pending_interaction` / `archived` / `last_turn_reason`（`last_prompt` 保留） | 所有读 session 详情的代码 | 状态机改三元组推导 |
-| 3 | **WS 确认帧统一为 `{"type":"ack"}`**，不再有 `subscribe_ack` 等专用帧 | `wire-client.ts handleDirectEvent` | 按帧 `id` 关联，勿匹配 `subscribe_ack` |
+| 3 | **WS 确认帧统一为 `{"type":"ack"}`**，不再有 `subscribe_ack` 等专用帧 | 无直接破坏（现有代码只等 `server_hello`，不匹配 ack 类型）；仅未来新增订阅确认逻辑时需适配 | 按帧 `id` 关联，勿匹配 `subscribe_ack` |
 | 4 | **`approvals` / `questions` 列表强制 `?status=pending`** | `approve_tool` / `deny_tool` 相关轮询 | 查询必须带 `status=pending` |
 | 5 | **动作端点空 body 报 `50001`**（`:fork`/`:compact`/`:undo`/`:archive`） | 调用方 | 传 `{}` |
 | 6 | **新增端点**: `:archive`、`POST /export`(ZIP)、`/goal`、`/healthz`、`/workspaces/{id}/skills`、`/api/v2/*` | — | 可利用 `:archive` 做 session-retire 归档 |
