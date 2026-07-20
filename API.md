@@ -13,6 +13,8 @@
 - **响应信封**: 所有 REST 响应包裹在 `{ code: 0, msg: "success", data: {...}, request_id: "..." }` 中
 - **`code: 0`** = 成功，非 0 = 错误（`40001` 参数校验失败、`40101` 未认证、`40110` 未配置 provider、`50001` 通用错误）
 - **动作类端点**（`:fork`/`:compact`/`:undo`/`:archive` 等）: Content-Type 为 `application/json` 时 **body 不能为空**，至少传 `{}`
+- **WS 鉴权**: 0.24+ 起 `/api/v1/ws` 升级强制要求 `Authorization` 头，缺失直接拒绝（server.log 记 `missing_credential`）；0.22.x 容忍无凭据连接（0.27 实测）
+- **模型传递**: 0.24+ 静默忽略 session 创建/profile 中的 `agent_config.model`；model 必须通过 **prompt body 的 `model` 字段**传递，且有 session 级粘性（设置一次后续免带，0.27 实测）。空 model 的 session turn 必败（`model.not_configured`），且不回落 server 默认模型
 
 ---
 
@@ -67,7 +69,7 @@
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | **POST** | `/api/v1/sessions` | **创建新 session** |
-| GET | `/api/v1/sessions` | 列出 sessions（`{items[], has_more}`，分页/过滤参数 ⚠️ 归档过滤参数名未确认） |
+| GET | `/api/v1/sessions` | 列出 sessions `{items[], has_more}`（`page_size` 分页；缺省返回全量非归档 session。0.27 实测：归档 session 不出现在列表，`status=archived`/`archived=true`/`include_archived=true` 均不含归档项——归档后 REST 不可列） |
 | GET | `/api/v1/sessions/{id}` | 获取 session 详情（**新结构，见下**） |
 | GET | `/api/v1/sessions/{id}/profile` | 获取 session profile |
 | POST | `/api/v1/sessions/{id}/profile` | 更新 profile |
@@ -116,7 +118,7 @@
   "message_count": 0, "last_seq": 0
 }
 ```
-> ⛔ **破坏性**: `status`（idle/running/awaiting_approval/...）与 `last_prompt` 字段已**移除**，替换为 `busy` + `main_turn_active` + `pending_interaction` 三元组。`pending_interaction` 取值 ⚠️ 推断为 `none|approval|question`（0.27 实测确认 `none`；枚举全值来自二进制 schema 引用）。
+> ⛔ **破坏性**: `status`（idle/running/awaiting_approval/...）字段已**移除**，替换为 `busy` + `main_turn_active` + `pending_interaction` 三元组（`last_prompt` 保留，并新增 `last_turn_reason`: completed/failed/...）。`pending_interaction` 取值 ⚠️ 推断为 `none|approval|question`（0.27 实测确认 `none`；枚举全值来自二进制 schema 引用）。
 
 **GET /status 响应 data**（0.27.0 实测，⚠️ 结构已变）:
 ```json
@@ -183,7 +185,9 @@
   "goal_control": "pause|resume|cancel"
 }
 ```
-**响应 data** ⚠️（字段名 `prompt_id` / `user_message_id` 在 0.27 二进制中保留，成功响应结构未实测）: `{ prompt_id, user_message_id, ... }`
+**响应 data**（0.27 实测）: `{ prompt_id, user_message_id, status: "running", content: [...], created_at }`
+
+> ⛔ **model 行为（0.27 实测）**: prompt body 的 `model` 字段是**唯一有效**的模型指定方式——`agent_config.model`（创建/profile）被静默忽略；model 设置后有 session 级粘性，后续 prompt 免带。实测可用：`kimi-code/k3`、`deepseek/deepseek-v4-flash`、`deepseek/deepseek-v4-pro`。
 
 ---
 
@@ -380,21 +384,23 @@ S→C  {"type":"ack","id":"s1","code":0,"msg":"success",
   "payload": { "type": "<event_type>", "...": "..." } }
 ```
 
-**事件类型**（0.27 二进制中确认存在）:
+**事件类型**（0.27 真实帧流实测）:
 
 | `payload.type` | 说明 |
 |----------------|------|
-| `event.session.status_changed` | 状态变更（⚠️ 载荷字段是否仍为 `status` 枚举未实测，需运行中验证） |
+| ~~`event.session.status_changed`~~ | ⛔ **0.24+ 不再发送**，由 `event.session.work_changed` 取代（实测整个 turn 周期未出现一次） |
+| **`event.session.work_changed`** | **状态变更（0.24+ 唯一状态事件）**：`{busy, main_turn_active, pending_interaction, last_turn_reason}` |
 | `event.session.usage_updated` | token/上下文用量更新 |
-| `event.session.work_changed` | 工作区变更 |
 | `event.assistant.tool_use_started` / `tool_use_delta` / `tool_use_completed` | 工具调用流式事件 |
-| `turn.started` / `turn.ended` | Turn 生命周期 |
-| `prompt.submitted` / `prompt.completed` | Prompt 生命周期 |
-| `agent.status.updated` | Agent 状态（model, contextTokens, planMode, permission） |
-| `session.meta.updated` | Session 元数据变更 |
+| `turn.started` / `turn.ended` | Turn 生命周期（ended 含 `reason` 与 `error{code,message,retryable}`） |
+| `turn.step.interrupted` | 步骤中断（含 `reason:"error"`, `message`） |
+| `prompt.submitted` / `prompt.completed` | Prompt 生命周期（completed 含 `reason: completed|failed`） |
+| `agent.status.updated` | Agent 状态（phase, usage, contextTokens, model） |
+| `session.meta.updated` | Session 元数据变更（patch.lastPrompt 等） |
+| `context.spliced` | 上下文拼接变更 |
 | `goal.updated` | Goal 状态变更 |
 | `skill.activated` / `plugin_command.activated` | 激活事件 |
-| `error` / `warning` | 错误/警告事件 |
+| `error` / `warning` | 错误/警告事件（如 `model.not_configured`） |
 
 ---
 
@@ -456,13 +462,16 @@ S→C  {"type":"ack","id":"s1","code":0,"msg":"success",
 | # | 变更 | 影响面 | 适配建议 |
 |---|------|--------|----------|
 | 1 | **`GET /status` 移除 `data.status`**，改为 `{busy, thinking_level, permission, plan_mode, swarm_mode, context_tokens, max_context_tokens, context_usage}` | `wire-client.ts getSessionStatus()`、`poll-command.ts` Python 轮询 | `idle` 判定改 `busy==false`；`aborted` 需另找信号（turn.ended reason / snapshot）⚠️ |
-| 2 | **Session 对象移除 `status` / `last_prompt`**，新增 `busy` / `main_turn_active` / `pending_interaction` / `archived` | 所有读 session 详情的代码 | 状态机改三元组推导 |
+| 2 | **Session 对象移除 `status`**，新增 `busy` / `main_turn_active` / `pending_interaction` / `archived` / `last_turn_reason`（`last_prompt` 保留） | 所有读 session 详情的代码 | 状态机改三元组推导 |
 | 3 | **WS 确认帧统一为 `{"type":"ack"}`**，不再有 `subscribe_ack` 等专用帧 | `wire-client.ts handleDirectEvent` | 按帧 `id` 关联，勿匹配 `subscribe_ack` |
 | 4 | **`approvals` / `questions` 列表强制 `?status=pending`** | `approve_tool` / `deny_tool` 相关轮询 | 查询必须带 `status=pending` |
 | 5 | **动作端点空 body 报 `50001`**（`:fork`/`:compact`/`:undo`/`:archive`） | 调用方 | 传 `{}` |
 | 6 | **新增端点**: `:archive`、`POST /export`(ZIP)、`/goal`、`/healthz`、`/workspaces/{id}/skills`、`/api/v2/*` | — | 可利用 `:archive` 做 session-retire 归档 |
 | 7 | `meta.capabilities.background_tasks` → `tasks` | 能力检测 | 按新名读取 |
 | 8 | **v2 channel RPC 层引入**（37 channels + /api/v2/ws） | 未来迁移方向 | 暂保持 v1；v2/ws 帧格式待官方文档 |
+| 9 | **WS 升级强制鉴权**（0.27 实测：无 Authorization 头直接 `missing_credential` 拒绝；0.22.x 容忍） | `wire-client.ts wsConnect`（0.22.x 起即未带头） | 握手必须带 `Authorization: Bearer`（v2.17 已修） |
+| 10 | **`event.session.status_changed` 被 `event.session.work_changed` 取代**（0.27 实测整个 turn 周期无一次 status_changed；work_changed 载荷 `{busy, main_turn_active, pending_interaction, last_turn_reason}`） | `wire-client.ts handleDirectEvent` 状态缓存与 resolver | 并行处理两事件，work_changed 经归一化映射（v2.17 已修） |
+| 11 | **`agent_config.model` 被静默忽略**（创建/profile 更新均无效仍 `""`；空 model turn 必败 `model.not_configured`，不回落 server 默认模型） | `createSession` / prompt 提交 | prompt body 恒带 `model`（有粘性，幂等）；实测 `kimi-code/k3`、`deepseek/deepseek-v4-flash`、`deepseek/deepseek-v4-pro` 可用（v2.17 已修） |
 
 > 锁文件（`~/.kimi-code/server/lock`）格式不变（`{pid, started_at, host, port, host_version, entry}`），`server-lock.ts` 端口检测无需改动。
 

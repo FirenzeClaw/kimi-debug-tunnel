@@ -1,6 +1,6 @@
-# [OPEN] Web 引擎 0.24.x/0.27.0 重构适配分析
+# [DONE] Web 引擎 0.24.x/0.27.0 重构适配分析
 
-> 状态: OPEN（分析完成，代码未改） | 分支: `feat/web-engine-0.27-adaptation` | 日期: 2026-07-20
+> 状态: DONE（分析 + 修复 + 生产回归全部完成） | 分支: `feat/web-engine-0.27-adaptation` | 日期: 2026-07-20
 > 依据: API.md（0.27.0 实测重写版）+ 本仓库 src/ 逐行核查
 > 结论速览: **2 处必须改（status 状态模型），3 处建议改（健壮性/新能力），其余接口 0.27 实测兼容**
 
@@ -84,17 +84,27 @@
 
 ---
 
-## 五、待运行中验证项（需带 provider 的 0.27 实例）
+## 五、待运行中验证项 —— 全部已实测（2026-07-20 真实 0.27.0 server）
 
-1. `event.session.status_changed` 事件载荷是否仍含 `status` 枚举字段（决定 handleDirectEvent 是否要改）
-2. `pending_interaction` 枚举全值（推断 `none|approval|question`）
-3. `POST /prompts` 成功响应结构（`prompt_id`/`user_message_id`/`status`/`content`）
-4. `"aborted"` 状态在 0.27 的等价信号
-5. sessions 列表的归档过滤参数名
+1. ✅ `event.session.status_changed` **不再发送**（整个 turn 周期无一次），由 `event.session.work_changed`（载荷 `{busy, main_turn_active, pending_interaction, last_turn_reason}`）取代 → 已修（commit 9cf9aab）
+2. ✅ `pending_interaction` 实测确认 `none`；`approval`/`question` 仍为推断（归一化层精确匹配，未命中落 idle 兜底）
+3. ✅ `POST /prompts` 成功响应实测：`{prompt_id, user_message_id, status: "running", content, created_at}`
+4. ✅ `aborted` 等价信号：`last_turn_reason` + `turn.ended` 的 `reason`（completed/failed/...），`prompt.completed` 事件亦含 `reason`
+5. ✅ 归档过滤参数：实测 `status=archived`/`archived=true`/`include_archived=true` **均不含归档项**——归档 session 在 REST 列表不可见
 
-## 六、实施顺序建议
+## 五-b、生产实测新发现（3 个运行时破坏点，均已修复）
 
-1. **P0** `getSessionStatus()` 归一化映射（wire-client.ts 单点改，上层零侵入）+ POLL_SCRIPT busy 判定
-2. **P1** 运行中验证 §五项，按结果修 `handleDirectEvent`
-3. **P2** session-retire 接入 `:archive` + `/export`；文档（AGENTS.md/skills）curl 示例补 `?status=pending`
+| # | 破坏点 | 实测证据 | 修复 |
+|---|--------|----------|------|
+| A | WS 升级强制鉴权 | server.log: `ws upgrade rejected, reason: missing_credential`；tunnel wsConnected=false（0.22.x 容忍无凭据） | commit 726c578（wsConnect 补 Bearer 头） |
+| B | `status_changed` → `work_changed` 事件取代 | 真实帧流：work_changed 携带 busy/pending_interaction，无 status_changed | commit 9cf9aab（handleDirectEvent 并行处理 + applySessionStatus） |
+| C | `agent_config.model` 被静默忽略 | 创建传 model / POST profile 均无效仍 `""`；turn 报 `model.not_configured`，不回落默认模型；prompt body 带 `model` 后正常，且有 session 级粘性（实测 k3 / deepseek-v4-flash / deepseek-v4-pro） | commit 1eab294（prompt body 恒带 model：显式 > /auth default_model） |
+
+**端到端回归（2026-07-20）**：create_session → execute_prompt（真实只读审查任务）→ Bash 后台 poll_command → exit 0 拿到 2.5KB 真实回复；wsConnected=true；server.log 无新增 missing_credential；CTX_HIGH 告警正常触发。
+
+## 六、实施顺序建议（已执行完毕）
+
+1. ~~**P0** `getSessionStatus()` 归一化映射 + POLL_SCRIPT busy 判定~~（任务 1-3）
+2. ~~**P1** 运行中验证 + 运行时修复~~（任务 7-9：Fix A/B/C）
+3. **P2** session-retire 接入 `:archive` + `/export`；skills 文档 curl 示例核对（后续迭代）
 4. **P3**（远期）评估 v2 channel RPC 迁移
